@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
     # Postgres is the source of truth. Required.
-    database_url: str = "postgresql+psycopg://quorum:aryan@localhost:55432/quorum"
+    database_url: str = "postgresql+psycopg://quorum:quorum@localhost:55432/quorum"
 
     # Redis is a cache only (ADR-0009). The app runs correctly without it.
     redis_url: str = "redis://localhost:6379/0"
