@@ -59,7 +59,11 @@ def _scratch_database(name: str) -> Iterator[str]:
         connection.execute(text(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)'))
         connection.execute(text(f'CREATE DATABASE "{name}"'))
     try:
-        yield str(make_url(get_settings().database_url).set(database=name))
+        # render_as_string(hide_password=False), not str(): SQLAlchemy's URL.__str__
+        # redacts the password to "***", which would be passed through as a literal.
+        yield make_url(get_settings().database_url).set(database=name).render_as_string(
+            hide_password=False
+        )
     finally:
         with admin.connect() as cleanup:
             cleanup.execute(text(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)'))

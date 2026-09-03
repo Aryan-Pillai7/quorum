@@ -60,7 +60,8 @@ curl http://localhost:8000/v1/trust/categories
 
 Interactive API docs: <http://localhost:8000/docs>
 
-Postgres publishes on host port **55432** and Redis on **56379**, so the stack does not
+Postgres publishes on host port **55432** (user `quorum`, password `aryan`) and Redis on
+**56379**, so the stack does not
 collide with local installs.
 
 ### Running the backend on the host

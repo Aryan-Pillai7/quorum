@@ -87,3 +87,24 @@ def test_create_app_calls_the_guard(monkeypatch):
     monkeypatch.setattr(main, "get_settings", lambda: _settings(database_url="sqlite://"))
     with pytest.raises(ConfigurationError, match="must be a postgresql URL"):
         main.create_app()
+
+
+def test_blank_anthropic_key_reads_as_no_key():
+    """docker-compose forwards an unset ANTHROPIC_API_KEY as "". That is not a key.
+
+    Without this, the service logs agent_enabled=true while having no way to call
+    Claude -- a capability claim it cannot honour.
+    """
+    assert _settings(anthropic_api_key="").agent_enabled is False
+    assert _settings(anthropic_api_key="   ").agent_enabled is False
+    assert _settings(anthropic_api_key="").anthropic_api_key is None
+
+
+def test_a_real_key_enables_the_agent_layer():
+    assert _settings(anthropic_api_key="sk-ant-test").agent_enabled is True
+
+
+def test_blank_key_fails_production_validation():
+    """The empty string must not sneak past the production key requirement."""
+    with pytest.raises(ConfigurationError, match="anthropic_api_key is required"):
+        validate_settings(_settings(environment="production", anthropic_api_key=""))

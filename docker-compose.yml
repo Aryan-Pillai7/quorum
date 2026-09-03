@@ -10,7 +10,7 @@ services:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: quorum
-      POSTGRES_PASSWORD: quorum
+      POSTGRES_PASSWORD: aryan
       POSTGRES_DB: quorum
     ports:
       - "55432:5432"
@@ -42,7 +42,7 @@ services:
     environment:
       ENVIRONMENT: local
       LOG_LEVEL: INFO
-      DATABASE_URL: postgresql+psycopg://quorum:quorum@db:5432/quorum
+      DATABASE_URL: postgresql+psycopg://quorum:aryan@db:5432/quorum
       REDIS_URL: redis://cache:6379/0
       # Optional: the agent layer stays disabled without it, and says so at boot.
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}

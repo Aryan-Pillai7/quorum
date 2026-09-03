@@ -10,7 +10,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.core.errors import ConfigurationError
@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
     # Postgres is the source of truth. Required.
-    database_url: str = "postgresql+psycopg://quorum:quorum@localhost:5432/quorum"
+    database_url: str = "postgresql+psycopg://quorum:aryan@localhost:55432/quorum"
 
     # Redis is a cache only (ADR-0009). The app runs correctly without it.
     redis_url: str = "redis://localhost:6379/0"
@@ -44,9 +44,23 @@ class Settings(BaseSettings):
     default_review_threshold: float = Field(default=0.60, ge=0.0, le=1.0)
     default_min_sample_size: int = Field(default=50, ge=1)
 
+    @field_validator("anthropic_api_key", mode="before")
+    @classmethod
+    def _blank_key_is_no_key(cls, value: str | None) -> str | None:
+        """Treat an empty or whitespace-only key as absent.
+
+        docker-compose passes ANTHROPIC_API_KEY through as "" when the host has not set
+        it. Without this, the empty string reads as a configured key and the service
+        reports agent_enabled=true while having no way to call Claude -- a capability
+        claim it cannot honour.
+        """
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
     @property
     def agent_enabled(self) -> bool:
-        return self.anthropic_api_key is not None
+        return bool(self.anthropic_api_key)
 
 
 def validate_settings(settings: Settings) -> Settings:
