@@ -27,7 +27,8 @@ class Transaction(Base, TimestampMixin):
     id: Mapped[uuid.UUID] = uuid_pk()
 
     source: Mapped[SourceSystem] = mapped_column(
-        Enum(SourceSystem, native_enum=False, length=32), nullable=False
+        Enum(SourceSystem, native_enum=False, create_constraint=True, name="source", length=32),
+        nullable=False,
     )
 
     # The identifier this source uses for the row: PSP payment id, bank txn id,
@@ -42,7 +43,8 @@ class Transaction(Base, TimestampMixin):
     amount_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
     direction: Mapped[Direction] = mapped_column(
-        Enum(Direction, native_enum=False, length=16), nullable=False
+        Enum(Direction, native_enum=False, create_constraint=True, name="direction", length=16),
+        nullable=False,
     )
 
     # When the money moved according to this source. Timezone-aware: a settlement file
@@ -53,7 +55,13 @@ class Transaction(Base, TimestampMixin):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     status: Mapped[TransactionStatus] = mapped_column(
-        Enum(TransactionStatus, native_enum=False, length=16),
+        Enum(
+            TransactionStatus,
+            native_enum=False,
+            create_constraint=True,
+            name="status",
+            length=16,
+        ),
         nullable=False,
         default=TransactionStatus.UNMATCHED,
         server_default=TransactionStatus.UNMATCHED.value,

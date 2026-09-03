@@ -25,7 +25,8 @@ class DiscrepancyCategory(Base, TimestampMixin):
     description: Mapped[str] = mapped_column(Text, nullable=False)
 
     severity: Mapped[Severity] = mapped_column(
-        Enum(Severity, native_enum=False, length=16), nullable=False
+        Enum(Severity, native_enum=False, create_constraint=True, name="severity", length=16),
+        nullable=False,
     )
 
     # Per-category absolute tolerance in minor units. Integer, so comparison stays exact

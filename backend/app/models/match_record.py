@@ -38,10 +38,12 @@ class MatchRecord(Base, TimestampMixin):
     match_key: Mapped[str] = mapped_column(String(128), nullable=False)
 
     status: Mapped[MatchStatus] = mapped_column(
-        Enum(MatchStatus, native_enum=False, length=16), nullable=False
+        Enum(MatchStatus, native_enum=False, create_constraint=True, name="status", length=16),
+        nullable=False,
     )
     strategy: Mapped[MatchStrategy] = mapped_column(
-        Enum(MatchStrategy, native_enum=False, length=32), nullable=False
+        Enum(MatchStrategy, native_enum=False, create_constraint=True, name="strategy", length=32),
+        nullable=False,
     )
 
     # Deterministic confidence from the rule that fired -- 1.0 for an exact reference

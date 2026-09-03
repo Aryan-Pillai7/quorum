@@ -35,7 +35,8 @@ class AuditEvent(Base):
     )
 
     actor_type: Mapped[ActorType] = mapped_column(
-        Enum(ActorType, native_enum=False, length=16), nullable=False
+        Enum(ActorType, native_enum=False, create_constraint=True, name="actor_type", length=16),
+        nullable=False,
     )
     # Which specific actor: a user id, or the model id for an agent action. Keeping the
     # model id here is what makes "which model version decided this?" answerable later.
