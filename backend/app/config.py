@@ -63,7 +63,9 @@ def validate_settings(settings: Settings) -> Settings:
         )
 
     if not settings.redis_url.startswith(("redis://", "rediss://", "unix://")):
-        problems.append(f"redis_url must start with redis:// or rediss://; got {settings.redis_url!r}")
+        problems.append(
+            f"redis_url must start with redis:// or rediss://; got {settings.redis_url!r}"
+        )
 
     if settings.log_level.upper() not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
         problems.append(f"log_level {settings.log_level!r} is not a valid level name")

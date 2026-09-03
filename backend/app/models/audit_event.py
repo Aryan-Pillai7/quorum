@@ -62,4 +62,7 @@ class AuditEvent(Base):
     )
 
     def __repr__(self) -> str:
-        return f"<AuditEvent {self.action} {self.entity_type}:{self.entity_id} by {self.actor_type}>"
+        return (
+            f"<AuditEvent {self.action} {self.entity_type}:{self.entity_id} "
+            f"by {self.actor_type}>"
+        )

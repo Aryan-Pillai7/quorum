@@ -1,0 +1,64 @@
+# Quorum local stack. One command from clean clone to a running API.
+#
+#   docker compose up --build
+#
+# Postgres and Redis publish on non-default host ports (55432 / 56379) so this stack
+# does not collide with anything already running locally.
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: quorum
+      POSTGRES_PASSWORD: quorum
+      POSTGRES_DB: quorum
+    ports:
+      - "55432:5432"
+    volumes:
+      - quorum_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # The backend waits on this, so it must test the database, not just the port.
+      test: ["CMD-SHELL", "pg_isready -U quorum -d quorum"]
+      interval: 3s
+      timeout: 3s
+      retries: 15
+
+  cache:
+    image: redis:7-alpine
+    # No persistence: Redis holds only cached trust scores, and Postgres is the source
+    # of truth (ADR-0009). Losing the cache costs a re-read, not data.
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "56379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 15
+
+  backend:
+    build:
+      context: ./backend
+    environment:
+      ENVIRONMENT: local
+      LOG_LEVEL: INFO
+      DATABASE_URL: postgresql+psycopg://quorum:quorum@db:5432/quorum
+      REDIS_URL: redis://cache:6379/0
+      # Optional: the agent layer stays disabled without it, and says so at boot.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      cache:
+        condition: service_healthy
+    # Migrations run on start so a fresh clone comes up with a correct, seeded schema.
+    # Phase 1 scale makes this safe; a real deployment would run migrations as a
+    # separate step rather than on every container start.
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000"
+
+volumes:
+  quorum_pgdata:
