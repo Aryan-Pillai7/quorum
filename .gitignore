@@ -216,3 +216,14 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# --- Quorum: local-only agent + planning context (never committed) ---
+CLAUDE.md
+plan.md
+decisions.md
+
+# --- Quorum: local artifacts ---
+.env
+.env.local
+data/local/
+*.local.json
