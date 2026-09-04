@@ -1,0 +1,80 @@
+name: CI
+
+# Mechanically enforces what ADR-0010 previously left as a documented convention:
+# ruff and the full test suite, unit and integration, before anything merges.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    services:
+      # Integration tests create and drop their own scratch databases, so this needs to
+      # be a real server rather than a single pre-made database.
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: quorum
+          POSTGRES_PASSWORD: quorum
+          POSTGRES_DB: quorum
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U quorum"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      # Services are published on their default ports here, unlike docker-compose, which
+      # shifts them to avoid colliding with whatever is already on a developer's machine.
+      DATABASE_URL: postgresql+psycopg://quorum:quorum@localhost:5432/quorum
+      REDIS_URL: redis://localhost:6379/0
+      ENVIRONMENT: test
+      # No GEMINI_API_KEY on purpose. The suite must pass with the agent layer disabled,
+      # which also proves the "no key configured" paths are honest rather than assumed.
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        working-directory: backend
+        run: pip install -e ".[dev]"
+
+      - name: Lint
+        working-directory: backend
+        run: ruff check app tests scripts
+
+      - name: Unit tests
+        working-directory: backend
+        run: pytest -q
+
+      - name: Integration tests
+        working-directory: backend
+        run: pytest -m integration -q
+
+      - name: Verify the fixture is reproducible from its seed
+        working-directory: backend
+        # ADR-0015 claims the checked-in dataset regenerates byte-identically. Claims in
+        # an ADR are worth exactly as much as the thing that checks them.
+        run: |
+          python scripts/generate_fixture.py > /dev/null
+          git diff --exit-code -- tests/fixtures/

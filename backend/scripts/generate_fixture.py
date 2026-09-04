@@ -545,7 +545,11 @@ def write(data: Dataset) -> dict[str, object]:
     for name, rows in files.items():
         path = FIXTURE_DIR / name
         with path.open("w", newline="", encoding="utf-8") as handle:
-            writer = csv.DictWriter(handle, fieldnames=list(rows[0].keys()))
+            # Explicit LF: csv defaults to CRLF, which would make the "regenerates
+            # byte-identically" claim in ADR-0015 depend on which OS ran it.
+            writer = csv.DictWriter(
+                handle, fieldnames=list(rows[0].keys()), lineterminator=chr(10)
+            )
             writer.writeheader()
             writer.writerows(rows)
 
