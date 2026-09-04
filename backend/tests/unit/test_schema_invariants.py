@@ -21,6 +21,7 @@ EXPECTED_TABLES = {
     "audit_events",
     "ingestion_batches",
     "quarantined_rows",
+    "settlement_groups",
 }
 
 
@@ -48,6 +49,9 @@ def test_money_columns_are_bigint_minor_units():
         ("match_records", "amount_delta_minor"),
         ("discrepancies", "delta_minor"),
         ("discrepancy_categories", "tolerance_minor"),
+        ("settlement_groups", "bank_amount_minor"),
+        ("settlement_groups", "members_total_minor"),
+        ("settlement_groups", "delta_minor"),
     ]
     for table_name, column_name in money_columns:
         column = Base.metadata.tables[table_name].columns[column_name]
@@ -159,3 +163,31 @@ def test_ingestion_batch_row_counts_must_reconcile():
 def test_quarantined_rows_are_write_once():
     """Like audit rows: written once with a reason, never revised."""
     assert "updated_at" not in Base.metadata.tables["quarantined_rows"].columns
+
+
+def test_a_bank_credit_can_be_claimed_by_at_most_one_settlement_group():
+    """Two overlapping groups would each claim the same money (ADR-0019)."""
+    unique = {
+        tuple(c.name for c in uc.columns)
+        for uc in Base.metadata.tables["settlement_groups"].constraints
+        if uc.__class__.__name__ == "UniqueConstraint"
+    }
+    assert ("bank_transaction_id",) in unique
+
+
+def test_a_resolved_group_must_be_unique_and_plural():
+    """A group of one is a 1:1 match; a group with two solutions is a guess."""
+    check_names = {
+        c.name
+        for c in Base.metadata.tables["settlement_groups"].constraints
+        if c.__class__.__name__ == "CheckConstraint"
+    }
+    assert "ck_settlement_groups_resolved_group_is_unique_and_plural" in check_names
+
+
+def test_the_one_to_one_match_legs_are_untouched_by_phase_4():
+    """ADR-0019 extends ADR-0005 for one case; it does not redesign it."""
+    columns = Base.metadata.tables["match_records"].columns
+    for leg in ("psp_transaction_id", "bank_transaction_id", "ledger_transaction_id"):
+        assert leg in columns
+        assert columns[leg].nullable is True

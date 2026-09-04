@@ -45,6 +45,9 @@ class MatchStrategy(StrEnum):
     EXACT_REFERENCE = "EXACT_REFERENCE"
     REFERENCE_AMOUNT_TOLERANCE = "REFERENCE_AMOUNT_TOLERANCE"
     AMOUNT_DATE_WINDOW = "AMOUNT_DATE_WINDOW"
+    # Phase 4: one bank credit explained by a SET of settlement rows (ADR-0019).
+    AGGREGATE_SHARED_REFERENCE = "AGGREGATE_SHARED_REFERENCE"
+    AGGREGATE_SUBSET_SUM = "AGGREGATE_SUBSET_SUM"
     MANUAL = "MANUAL"
 
 
@@ -105,3 +108,18 @@ class DetectedBy(StrEnum):
 
     DETERMINISTIC = "DETERMINISTIC"
     AGENT = "AGENT"  # Phase 3; nothing writes this yet
+
+
+class GroupStatus(StrEnum):
+    """Outcome of trying to explain one bank credit as a set of settlement rows."""
+
+    RESOLVED = "RESOLVED"      # exactly one set explains the credit
+    AMBIGUOUS = "AMBIGUOUS"    # several sets do; the engine refuses to choose
+    INCONCLUSIVE = "INCONCLUSIVE"  # search was bounded out before it could decide
+
+
+class GroupMethod(StrEnum):
+    """How the members of a settlement group were identified."""
+
+    SHARED_REFERENCE = "SHARED_REFERENCE"  # all rows carry the credit's settlement UTR
+    SUBSET_SUM = "SUBSET_SUM"              # bounded search over a candidate window

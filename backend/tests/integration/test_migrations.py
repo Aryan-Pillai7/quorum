@@ -50,7 +50,13 @@ def _expected_category_count() -> int:
 
     initial = _load("0001_initial_schema")
     phase2 = _load("0002_ingestion_and_discrepancies")
-    return len(initial.CATEGORIES) + len(phase2.NEW_CATEGORIES) - 1  # 0002 drops UNCLASSIFIED
+    phase4 = _load("0003_settlement_groups")
+    return (
+        len(initial.CATEGORIES)
+        + len(phase2.NEW_CATEGORIES)
+        - 1  # 0002 retires UNCLASSIFIED
+        + (1 if phase4.AMBIGUOUS_CATEGORY else 0)  # 0003 adds AGGREGATION_AMBIGUOUS
+    )
 
 
 EXPECTED_CATEGORY_COUNT = _expected_category_count()

@@ -19,6 +19,8 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
+from sqlalchemy.orm import relationship
+
 from app.db.base import Base, TimestampMixin, uuid_pk
 from app.models.enums import Direction, SourceSystem, TransactionStatus
 
@@ -58,6 +60,13 @@ class Transaction(Base, TimestampMixin):
     # The COMMERCE reference: order id. Shared by the PSP settlement row and the ledger
     # entry. A bank statement line has none.
     order_ref: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
+    # Set on settlement rows that were aggregated into one bank credit (ADR-0019).
+    # Null for everything else, including the bank row itself -- the group points at the
+    # bank transaction, not the other way round.
+    settlement_group_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("settlement_groups.id", ondelete="SET NULL"), nullable=True
+    )
 
     # Normalized to what this source asserts actually moved, so all three are directly
     # comparable: PSP net settled, bank credit, ledger gross minus expected fee.
@@ -107,10 +116,15 @@ class Transaction(Base, TimestampMixin):
         Index("ix_transactions_counterparty_ref", "counterparty_ref"),
         Index("ix_transactions_order_ref", "order_ref"),
         Index("ix_transactions_batch_id", "batch_id"),
+        Index("ix_transactions_settlement_group_id", "settlement_group_id"),
         Index("ix_transactions_source_occurred_at", "source", "occurred_at"),
         Index("ix_transactions_status", "status"),
         # Amount+date fallback matching scans this; without it that pass is a seq scan.
         Index("ix_transactions_amount_minor_occurred_at", "amount_minor", "occurred_at"),
+    )
+
+    settlement_group = relationship(
+        "SettlementGroup", back_populates="members", foreign_keys=[settlement_group_id]
     )
 
     def __repr__(self) -> str:

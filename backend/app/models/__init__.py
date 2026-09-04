@@ -13,6 +13,8 @@ from app.models.enums import (
     BatchStatus,
     DetectedBy,
     Direction,
+    GroupMethod,
+    GroupStatus,
     GateDecision,
     MatchStatus,
     MatchStrategy,
@@ -23,6 +25,7 @@ from app.models.enums import (
 )
 from app.models.ingestion import IngestionBatch, QuarantinedRow
 from app.models.match_record import MatchRecord
+from app.models.settlement_group import SettlementGroup
 from app.models.transaction import Transaction
 from app.models.trust_score import TrustScore
 
@@ -36,6 +39,8 @@ __all__ = [
     "Discrepancy",
     "DiscrepancyCategory",
     "GateDecision",
+    "GroupMethod",
+    "GroupStatus",
     "IngestionBatch",
     "MatchRecord",
     "MatchStatus",
@@ -43,6 +48,7 @@ __all__ = [
     "QuarantineReason",
     "QuarantinedRow",
     "Severity",
+    "SettlementGroup",
     "SourceSystem",
     "Transaction",
     "TransactionStatus",

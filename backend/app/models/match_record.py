@@ -71,6 +71,13 @@ class MatchRecord(Base, TimestampMixin):
     # (ADR-0012 supersedes ADR-0007). A match can be both late and short on fee, and
     # forcing that into one column would mean discarding one of two true statements.
 
+    # Set when this record is part of an aggregated payout (ADR-0019). The group's own
+    # record carries the bank leg; each member's record carries psp + ledger and no bank
+    # leg, because no individual settlement row matched that credit -- the set did.
+    settlement_group_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("settlement_groups.id", ondelete="SET NULL"), nullable=True
+    )
+
     # How the legs were joined: which field was compared for each leg, and by which pass.
     # This is the traceability record for the match itself, as distinct from the
     # per-finding evidence on each discrepancy row.
@@ -97,6 +104,7 @@ class MatchRecord(Base, TimestampMixin):
         Index("uq_match_records_ledger_transaction_id", "ledger_transaction_id", unique=True),
         Index("ix_match_records_match_key", "match_key"),
         Index("ix_match_records_status", "status"),
+        Index("ix_match_records_settlement_group_id", "settlement_group_id"),
         CheckConstraint("confidence >= 0 AND confidence <= 1", name="confidence_in_range"),
         # A match with no legs is meaningless and would otherwise be silently insertable.
         CheckConstraint(
