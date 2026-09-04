@@ -22,7 +22,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
-from app.models import Discrepancy, DiscrepancyCategory, MatchRecord, TrustScore
+from app.models import AuditEvent, Discrepancy, DiscrepancyCategory, MatchRecord, TrustScore
 from app.services.agent.client import (
     AgentUnavailableError,
     GeminiClient,
@@ -85,6 +85,7 @@ class ExplanationRun:
     model: str | None
     explained: list[ExplainedDiscrepancy] = field(default_factory=list)
     telemetry: list[BatchTelemetry] = field(default_factory=list)
+    skipped_already_explained: int = 0
 
     @property
     def total_latency_ms(self) -> float:
@@ -165,11 +166,17 @@ def explain_discrepancies(
     *,
     limit_per_category: int | None = None,
     settings: Settings | None = None,
+    skip_explained: bool = True,
 ) -> ExplanationRun:
-    """Explain every discrepancy in the database, batched one call per category.
+    """Explain the discrepancies in the database, batched one call per category.
 
     Runs the trust gate for every discrepancy regardless of whether the agent layer is
     available, so gating is never contingent on the model answering.
+
+    `skip_explained` (default on) omits findings that already have an explanation in the
+    audit trail. Explanations of an unchanged deterministic finding do not improve on
+    re-generation, and re-running a demo should not spend quota re-deriving them. Turning
+    it off forces a fresh pass -- useful after a prompt change, expensive otherwise.
     """
     settings = settings or get_settings()
     available, status = agent_availability(settings)
@@ -182,14 +189,28 @@ def explain_discrepancies(
         .order_by(Discrepancy.category_code, MatchRecord.match_key)
     ).all()
 
+    already_explained: set[str] = set()
+    if skip_explained:
+        already_explained = {
+            row[0]
+            for row in session.execute(
+                select(AuditEvent.entity_id).where(AuditEvent.action == "agent.explained")
+            ).all()
+        }
+
     by_category: dict[str, list[tuple]] = {}
+    skipped = 0
     for discrepancy, match, category, trust in rows:
+        if str(discrepancy.id) in already_explained:
+            skipped += 1
+            continue
         by_category.setdefault(category.code, []).append((discrepancy, match, category, trust))
 
     run = ExplanationRun(
         agent_available=available,
         agent_status=status,
         model=settings.gemini_model if available else None,
+        skipped_already_explained=skipped,
     )
 
     client: GeminiClient | None = None

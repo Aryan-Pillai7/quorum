@@ -38,6 +38,14 @@ def run_reconciliation(
         ge=1,
         description="Cap explanations per category. Useful for a fast demo run.",
     ),
+    force_reexplain: bool = Query(
+        default=False,
+        description=(
+            "Re-generate explanations that already exist. Off by default: an unchanged "
+            "finding does not get a better explanation on a second pass, and re-running "
+            "costs API quota."
+        ),
+    ),
 ) -> dict[str, Any]:
     """Match, explain, gate, audit.
 
@@ -80,7 +88,10 @@ def run_reconciliation(
 
     if explain:
         run = explain_discrepancies(
-            db, limit_per_category=limit_per_category, settings=settings
+            db,
+            limit_per_category=limit_per_category,
+            settings=settings,
+            skip_explained=not force_reexplain,
         )
 
         for item in run.explained:
@@ -156,12 +167,20 @@ def run_reconciliation(
             "total_latency_ms": run.total_latency_ms,
             "explained": run.explained_count,
             "unexplained": run.unexplained_count,
+            "skipped_already_explained": run.skipped_already_explained,
         }
 
-        narrated = _narrated_examples(run)
+
+    # This run's deltas are often zero on a demo re-run, because everything is already
+    # matched. The current state of the book is what the dashboard shows, so return both
+    # rather than letting a row of zeros imply nothing was reconciled.
+    state = reporting.dashboard_summary(db, settings=settings)
+    # From the audit trail, so a cached re-run still has a story to tell.
+    narrated = reporting.narrated_examples(db)
 
     return {
-        "matching": {
+        "state": state["totals"],
+        "this_run": {
             "psp_rows": result.psp_rows,
             "bank_rows": result.bank_rows,
             "ledger_rows": result.ledger_rows,
@@ -171,6 +190,10 @@ def run_reconciliation(
             "broken_matches": result.broken_matches,
             "discrepancy_findings": result.discrepancies,
             "findings_by_category": result.findings_by_category,
+            "note": (
+                "Deltas for THIS run only. Zeros mean everything was already matched by "
+                "an earlier run, not that there is nothing to reconcile -- see `state`."
+            ),
         },
         "agent": explanation_payload,
         "gating": {
@@ -192,45 +215,6 @@ def run_reconciliation(
     }
 
 
-def _narrated_examples(run) -> list[dict[str, Any]]:
-    """One example per reason a finding is held back, for the 30-second demo walkthrough.
-
-    The two reasons are genuinely different and the distinction is the pitch:
-    a category can be barred by policy no matter how good its score gets, or it can be
-    eligible in principle and simply not have earned it yet.
-    """
-    examples: list[dict[str, Any]] = []
-    seen_reasons: set[str] = set()
-
-    for item in run.explained:
-        if item.explanation is None:
-            continue
-        reason = "policy_ceiling" if "not eligible" in item.gate_reason else "cold_start"
-        if reason in seen_reasons:
-            continue
-        seen_reasons.add(reason)
-        examples.append(
-            {
-                "why_held_back": reason,
-                "discrepancy_id": item.discrepancy_id,
-                "match_key": item.match_key,
-                "category_code": item.category_code,
-                "rule_id": item.rule_id,
-                "delta_minor": item.delta_minor,
-                "deterministic_summary": item.deterministic_summary,
-                "agent_explanation": item.explanation,
-                "agent_corrective_action": item.corrective_action,
-                "model_confidence": item.model_confidence,
-                "gate_decision": item.gate_decision,
-                "gate_reason": item.gate_reason,
-                "observations_needed": item.observations_needed,
-            }
-        )
-        if len(seen_reasons) == 2:
-            break
-    return examples
-
-
 @router.get("/dashboard", summary="Everything the dashboard renders, from stored rows")
 def dashboard(
     db: Session = Depends(get_db), settings: Settings = Depends(get_settings)
@@ -246,3 +230,9 @@ def discrepancies(
 ) -> dict[str, Any]:
     rows = reporting.discrepancy_detail(db, limit=limit, category_code=category_code)
     return {"total": len(rows), "discrepancies": rows}
+
+
+@router.get("/narrated", summary="Worked examples for the demo walkthrough")
+def narrated(db: Session = Depends(get_db)) -> dict[str, Any]:
+    """One explained finding per reason it is held back from automation."""
+    return {"examples": reporting.narrated_examples(db)}

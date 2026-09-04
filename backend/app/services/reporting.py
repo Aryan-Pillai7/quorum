@@ -256,3 +256,64 @@ def discrepancy_detail(
             }
         )
     return detail
+
+
+def narrated_examples(session: Session, *, limit: int = 2) -> list[dict[str, Any]]:
+    """One explained finding per reason it is being held back, for the demo walkthrough.
+
+    Read from the audit trail rather than from a run, so the examples survive a cached
+    re-run where nothing new was explained.
+
+    The two reasons are genuinely different, and the distinction is the whole pitch:
+    a category can be barred by policy no matter how good its score ever gets, or it can
+    be eligible in principle and simply not have earned it yet.
+    """
+    rows = session.execute(
+        select(AuditEvent.entity_id, AuditEvent.payload, AuditEvent.occurred_at)
+        .where(AuditEvent.action == "agent.explained")
+        .order_by(AuditEvent.occurred_at.desc())
+    ).all()
+
+    examples: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for entity_id, payload, _occurred in rows:
+        if not payload.get("explanation"):
+            continue
+        reason = (
+            "policy_ceiling"
+            if "not eligible" in (payload.get("gate_reason") or "")
+            else "cold_start"
+        )
+        if reason in seen:
+            continue
+        seen.add(reason)
+        examples.append(
+            {
+                "why_held_back": reason,
+                "why_held_back_plain": (
+                    "This category is never auto-applied at any trust score. It is a "
+                    "policy ceiling, not a confidence judgement."
+                    if reason == "policy_ceiling"
+                    else (
+                        "This category could be automated in principle, but has not yet "
+                        "been observed enough times for its score to count as evidence."
+                    )
+                ),
+                "discrepancy_id": entity_id,
+                "match_key": payload.get("match_key"),
+                "category_code": payload.get("category_code"),
+                "rule_id": payload.get("rule_id"),
+                "delta_minor": payload.get("delta_minor"),
+                "agent_explanation": payload.get("explanation"),
+                "agent_corrective_action": payload.get("corrective_action"),
+                "model_confidence": payload.get("model_confidence"),
+                "model": payload.get("model"),
+                "gate_decision": payload.get("gate_decision"),
+                "gate_reason": payload.get("gate_reason"),
+                "observations_needed": payload.get("observations_needed"),
+                "advisory_only": True,
+            }
+        )
+        if len(examples) >= limit:
+            break
+    return examples

@@ -5,9 +5,10 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from app.api.v1.router import root_router, v1_router
 from app.config import get_settings, validate_settings
@@ -42,6 +43,7 @@ def create_app() -> FastAPI:
 
     app.include_router(root_router)
     app.include_router(v1_router)
+    _install_dashboard(app)
 
     logger.info(
         "quorum started",
@@ -53,6 +55,21 @@ def create_app() -> FastAPI:
         },
     )
     return app
+
+
+def _install_dashboard(app: FastAPI) -> None:
+    """Serve the dashboard from the API itself.
+
+    One origin means no CORS configuration and no second process to start during a
+    demo. The page is a single static file that calls the same read endpoints anyone
+    else would.
+    """
+    dashboard_file = Path(__file__).parent / "static" / "dashboard.html"
+
+    @app.get("/", include_in_schema=False)
+    @app.get("/dashboard", include_in_schema=False)
+    def serve_dashboard() -> FileResponse:
+        return FileResponse(dashboard_file, media_type="text/html")
 
 
 def _install_middleware(app: FastAPI) -> None:

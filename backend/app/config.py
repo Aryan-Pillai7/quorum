@@ -37,7 +37,11 @@ class Settings(BaseSettings):
     # Gemini (ADR-0016). Absent means the agent layer is disabled and says so, rather
     # than silently degrading to no explanations with no indication why.
     gemini_api_key: str | None = None
-    gemini_model: str = "gemini-3.5-flash"
+    # Lite by choice, not by compromise: this layer restates field comparisons the rules
+    # engine already made, which is not a reasoning task. It measured ~0.9s against
+    # ~1.8s for the full flash model, and free-tier quota is per model, so a lite model
+    # also leaves the heavier one free.
+    gemini_model: str = "gemini-3.1-flash-lite"
     gemini_timeout_seconds: float = 30.0
     # Transient 5xx from the API was observed in roughly a third of calls during Phase 3
     # testing, so retry is a requirement here, not a precaution.

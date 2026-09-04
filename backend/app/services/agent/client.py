@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 RETRYABLE_CLIENT_STATUSES = frozenset({408, 429})
 
 # Longer than the 5xx backoff: a quota window outlasts a transient blip.
-RATE_LIMIT_BASE_BACKOFF_SECONDS = 2.0
+RATE_LIMIT_BASE_BACKOFF_SECONDS = 5.0
 
 
 class AgentUnavailableError(QuorumError):

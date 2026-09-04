@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quorum — Reconciliation Dashboard</title>
+<style>
+  :root {
+    --bg: #0e1116; --panel: #161b22; --line: #262d38;
+    --text: #e6edf3; --muted: #8b949e; --dim: #6e7681;
+    --ok: #3fb950; --warn: #d29922; --bad: #f85149; --accent: #58a6ff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.5 ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif;
+  }
+  header {
+    padding: 20px 28px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap;
+  }
+  h1 { font-size: 19px; margin: 0; letter-spacing: -0.2px; }
+  .sub { color: var(--muted); font-size: 13px; }
+  .wrap { padding: 22px 28px 60px; max-width: 1280px; }
+  .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; }
+  .panel {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 16px 18px;
+  }
+  .panel h2 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.9px;
+    color: var(--muted); margin: 0 0 12px; font-weight: 600;
+  }
+  .stat { font-size: 27px; font-weight: 650; letter-spacing: -0.5px; }
+  .stat.warn { color: var(--warn); }
+  .stat-note { color: var(--dim); font-size: 12px; margin-top: 6px; }
+  .mt { margin-top: 18px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th {
+    text-align: left; font-weight: 600; color: var(--muted); font-size: 11px;
+    text-transform: uppercase; letter-spacing: 0.6px;
+    padding: 7px 10px; border-bottom: 1px solid var(--line);
+  }
+  td { padding: 9px 10px; border-bottom: 1px solid #1d232c; vertical-align: middle; }
+  tr:last-child td { border-bottom: none; }
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .bar-track {
+    background: #21262d; border-radius: 3px; height: 7px; width: 100%;
+    overflow: hidden; min-width: 90px;
+  }
+  .bar-fill { height: 100%; background: var(--accent); border-radius: 3px; }
+  .pill {
+    display: inline-block; padding: 2px 8px; border-radius: 999px;
+    font-size: 11px; font-weight: 600; letter-spacing: 0.2px; white-space: nowrap;
+  }
+  .pill.review { background: rgba(210,153,34,0.16); color: var(--warn); }
+  .pill.auto   { background: rgba(63,185,80,0.16);  color: var(--ok); }
+  .pill.block  { background: rgba(248,81,73,0.16);  color: var(--bad); }
+  .sev { font-size: 11px; color: var(--dim); }
+  .why { color: var(--dim); font-size: 12px; }
+  .caveat {
+    background: rgba(210,153,34,0.07); border: 1px solid rgba(210,153,34,0.28);
+    border-radius: 8px; padding: 12px 15px; color: #d9c07a; font-size: 12.5px;
+  }
+  .caveat b { color: var(--warn); }
+  .caveat ul { margin: 7px 0 0; padding-left: 18px; }
+  .case { border-left: 3px solid var(--accent); padding-left: 14px; margin-bottom: 20px; }
+  .case:last-child { margin-bottom: 0; }
+  .case h3 { font-size: 13px; margin: 0 0 3px; }
+  .case .meta { color: var(--dim); font-size: 12px; margin-bottom: 9px; }
+  .case p { margin: 7px 0; }
+  .label {
+    color: var(--muted); font-size: 11px; text-transform: uppercase;
+    letter-spacing: 0.6px; font-weight: 600;
+  }
+  .rules { color: var(--muted); font-size: 12.5px; font-family: ui-monospace, monospace; }
+  button {
+    background: var(--accent); color: #04121f; border: 0; border-radius: 7px;
+    padding: 8px 15px; font-weight: 650; font-size: 13px; cursor: pointer;
+  }
+  button:disabled { opacity: 0.5; cursor: default; }
+  .err { color: var(--bad); }
+  code { font-family: ui-monospace, monospace; font-size: 12px; color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Quorum</h1>
+  <span class="sub">Three-way payment reconciliation · deterministic engine + advisory AI</span>
+  <span class="sub" id="status" style="margin-left:auto"></span>
+</header>
+
+<div class="wrap">
+  <div class="caveat" id="caveats">Loading…</div>
+
+  <div class="row mt">
+    <div class="panel">
+      <h2>Reconciled cleanly</h2>
+      <div class="stat" id="clean">—</div>
+      <div class="stat-note" id="clean-note"></div>
+    </div>
+    <div class="panel">
+      <h2>₹ awaiting human review</h2>
+      <div class="stat warn" id="at-risk">—</div>
+      <div class="stat-note" id="at-risk-note"></div>
+    </div>
+    <div class="panel">
+      <h2>Findings explained</h2>
+      <div class="stat" id="explained">—</div>
+      <div class="stat-note" id="explained-note"></div>
+    </div>
+    <div class="panel">
+      <h2>Auto-applied by AI</h2>
+      <div class="stat" id="auto">—</div>
+      <div class="stat-note" id="auto-note"></div>
+    </div>
+  </div>
+
+  <div class="panel mt">
+    <h2>Trust score by discrepancy category — what the system will and will not automate</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Category</th>
+          <th class="num">Findings</th>
+          <th class="num">₹ at risk</th>
+          <th>Trust score</th>
+          <th class="num">Evidence</th>
+          <th>Gate</th>
+          <th>Why</th>
+        </tr>
+      </thead>
+      <tbody id="cats"><tr><td colspan="7">Loading…</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="panel mt">
+    <h2>Worked example — one transaction, end to end</h2>
+    <div id="cases">Loading…</div>
+  </div>
+</div>
+
+<script>
+const money = (minor) =>
+  "₹" + (minor / 100).toLocaleString("en-IN", { maximumFractionDigits: 0 });
+const esc = (s) =>
+  String(s ?? "").replace(/[&<>"]/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+const pillClass = (g) =>
+  g === "AUTO_APPLY" ? "auto" : g === "BLOCK" ? "block" : "review";
+
+async function load() {
+  const status = document.getElementById("status");
+  try {
+    const [dash, narrated] = await Promise.all([
+      fetch("/v1/dashboard").then((r) => r.json()),
+      fetch("/v1/narrated").then((r) => r.json()),
+    ]);
+    render(dash, narrated.examples || []);
+    status.textContent = "updated " + new Date().toLocaleTimeString();
+  } catch (e) {
+    status.innerHTML = '<span class="err">failed to load: ' + esc(e.message) + "</span>";
+  }
+}
+
+function render(d, cases) {
+  const t = d.totals, r = d.at_risk;
+
+  document.getElementById("clean").textContent =
+    t.full_matches + " / " + t.match_records;
+  document.getElementById("clean-note").textContent =
+    t.transactions.toLocaleString("en-IN") +
+    " source rows matched into " + t.match_records + " records";
+
+  document.getElementById("at-risk").textContent = money(r.awaiting_human_review_minor);
+  document.getElementById("at-risk-note").textContent =
+    r.findings_awaiting_review + " findings routed to a human. " + r.definition;
+
+  document.getElementById("explained").textContent =
+    t.explained_findings + " / " + t.discrepancy_findings;
+  document.getElementById("explained-note").textContent =
+    "explained by the agent layer; the rest carry their deterministic finding only";
+
+  // Deliberately shows zero. That is the honest number, and it is the point.
+  document.getElementById("auto").textContent = money(r.auto_eligible_minor);
+  document.getElementById("auto-note").textContent =
+    "nothing has earned automation yet — every category is at zero observations";
+
+  document.getElementById("caveats").innerHTML =
+    "<b>Read this with the numbers.</b><ul>" +
+    d.caveats.map((c) => "<li>" + esc(c) + "</li>").join("") + "</ul>";
+
+  document.getElementById("cats").innerHTML = d.categories.map((c) => {
+    const pct = Math.round((c.sample_size / c.min_sample_size) * 100);
+    return `<tr>
+      <td><div>${esc(c.display_name)}</div><div class="sev">${esc(c.severity)}</div></td>
+      <td class="num">${c.open_findings}</td>
+      <td class="num">${money(c.at_risk_minor)}</td>
+      <td>
+        <div class="bar-track"><div class="bar-fill" style="width:${(c.score * 100).toFixed(0)}%"></div></div>
+        <div class="sev">${c.score.toFixed(2)}</div>
+      </td>
+      <td class="num">${c.sample_size} / ${c.min_sample_size}<div class="sev">${pct}%</div></td>
+      <td><span class="pill ${pillClass(c.gate_decision)}">${esc(c.gate_decision)}</span></td>
+      <td class="why">${
+        c.auto_resolvable
+          ? "needs " + c.observations_needed + " more observations"
+          : "never automated — policy ceiling"
+      }</td>
+    </tr>`;
+  }).join("");
+
+  document.getElementById("cases").innerHTML = cases.length
+    ? cases.map((c) => `
+      <div class="case">
+        <h3>${esc(c.match_key)} — ${esc(c.category_code)}</h3>
+        <div class="meta">
+          rule <code>${esc(c.rule_id)}</code> ·
+          delta ${money(c.delta_minor)} ·
+          model ${esc(c.model)} (confidence: ${esc(c.model_confidence)}, advisory only)
+        </div>
+        <p><span class="label">AI explanation</span><br>${esc(c.agent_explanation)}</p>
+        <p><span class="label">Suggested action</span><br>${esc(c.agent_corrective_action)}</p>
+        <p>
+          <span class="pill ${pillClass(c.gate_decision)}">${esc(c.gate_decision)}</span>
+          <span class="why"> ${esc(c.why_held_back_plain)}</span>
+        </p>
+      </div>`).join("")
+    : "<p class='why'>No explained findings yet. Run <code>POST /v1/reconcile</code>.</p>";
+}
+
+load();
+setInterval(load, 15000);
+</script>
+</body>
+</html>
