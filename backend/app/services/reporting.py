@@ -23,7 +23,7 @@ from app.models import (
     Transaction,
     TrustScore,
 )
-from app.services.trust import decide_gate
+from app.services.trust import gate_for_trust_row
 
 # What "at risk" means, stated once and echoed into the API response so the number on the
 # dashboard always travels with its definition.
@@ -48,10 +48,18 @@ class CategoryTrustView:
     gate_reason: str
     open_findings: int
     at_risk_minor: int
+    # Staleness (ADR-0030). `score` above is the effective, decayed value the gate acted
+    # on; `base_score` is what the audits actually earned. Both are shown, because a
+    # number that quietly differs from the evidence behind it is the thing this project
+    # keeps refusing to ship.
+    base_score: float = 0.0
+    is_decaying: bool = False
+    days_since_audit: float | None = None
 
 
 def _gate_for(category: DiscrepancyCategory, trust: TrustScore | None, settings: Settings):
-    return decide_gate(
+    """Gate decision and staleness discount for a category (ADR-0030)."""
+    return gate_for_trust_row(
         score=trust.score if trust else 0,
         sample_size=trust.sample_size if trust else 0,
         correct_count=trust.correct_count if trust else 0,
@@ -61,6 +69,9 @@ def _gate_for(category: DiscrepancyCategory, trust: TrustScore | None, settings:
         review_threshold=trust.review_threshold if trust else settings.default_review_threshold,
         min_sample_size=trust.min_sample_size if trust else settings.default_min_sample_size,
         category_auto_resolvable=category.auto_resolvable,
+        last_audit_at=trust.last_evaluated_at if trust else None,
+        grace_days=settings.trust_decay_grace_days,
+        decay_days=settings.trust_decay_days,
     )
 
 
@@ -91,9 +102,13 @@ def category_trust_views(
     views: list[CategoryTrustView] = []
     for category, trust in rows:
         findings = counts.get(category.code, 0)
-        if only_with_findings and findings == 0:
+        gate, decay = _gate_for(category, trust, settings)
+        # A decaying category is shown even with no open findings. Hiding it would defeat
+        # the point of surfacing decay at all: the categories most worth noticing are the
+        # ones that earned trust and then went quiet, and quiet often means no findings
+        # came in either.
+        if only_with_findings and findings == 0 and not decay.is_decaying:
             continue
-        gate = _gate_for(category, trust, settings)
         minimum = trust.min_sample_size if trust else settings.default_min_sample_size
         have = trust.sample_size if trust else 0
         views.append(
@@ -102,7 +117,10 @@ def category_trust_views(
                 display_name=category.display_name,
                 severity=category.severity,
                 auto_resolvable=category.auto_resolvable,
-                score=float(trust.score) if trust else 0.0,
+                score=float(decay.effective_score),
+                base_score=float(decay.base_score),
+                is_decaying=decay.is_decaying,
+                days_since_audit=decay.days_since_audit,
                 sample_size=have,
                 min_sample_size=minimum,
                 observations_needed=max(0, minimum - have),
@@ -162,6 +180,9 @@ def dashboard_summary(session: Session, *, settings: Settings | None = None) -> 
                 "display_name": v.display_name,
                 "severity": v.severity,
                 "score": v.score,
+                "base_score": v.base_score,
+                "is_decaying": v.is_decaying,
+                "days_since_audit": v.days_since_audit,
                 "sample_size": v.sample_size,
                 "min_sample_size": v.min_sample_size,
                 "observations_needed": v.observations_needed,
@@ -212,6 +233,18 @@ def _caveats(views: list[CategoryTrustView]) -> list[str]:
             f"The remaining {len(cold)} are still cold-start seeds at sample_size 0. "
             f"Their 0.00 means no evidence, not poor accuracy."
         )
+    decaying = [v for v in views if v.is_decaying]
+    if decaying:
+        caveats.append(
+            f"{len(decaying)} category has gone quiet and its score is being discounted "
+            f"for staleness: "
+            + ", ".join(
+                f"{v.code} ({v.days_since_audit:.0f}d since last audit)" for v in decaying
+            )
+            + ". Silence is not evidence of correctness, so the discount only ever "
+            "pulls downward."
+        )
+
     if automating:
         caveats.append(
             f"{len(automating)} category has reached AUTO_APPLY: "

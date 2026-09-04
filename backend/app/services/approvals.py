@@ -43,7 +43,7 @@ from app.models import (
     TrustScore,
 )
 from app.services import audit
-from app.services.trust import GateDecision, decide_gate
+from app.services.trust import GateDecision, gate_for_trust_row
 from app.services.trust_store import cache_key, read_trust_authoritative
 
 logger = logging.getLogger(__name__)
@@ -87,7 +87,7 @@ class RecalibrationResult:
 def _gate_for_row(row: TrustScore, category: DiscrepancyCategory) -> GateDecision:
     """The gate decision for a category as it stands. No amount, so this is the
     category-level verdict rather than a verdict about one transaction."""
-    return decide_gate(
+    evaluation, _decay = gate_for_trust_row(
         score=row.score,
         sample_size=row.sample_size,
         correct_count=row.correct_count,
@@ -95,7 +95,9 @@ def _gate_for_row(row: TrustScore, category: DiscrepancyCategory) -> GateDecisio
         review_threshold=row.review_threshold,
         min_sample_size=row.min_sample_size,
         category_auto_resolvable=category.auto_resolvable,
-    ).decision
+        last_audit_at=row.last_evaluated_at,
+    )
+    return evaluation.decision
 
 
 def _ema(previous: float, outcome: float, alpha: float) -> float:

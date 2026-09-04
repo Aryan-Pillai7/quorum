@@ -146,6 +146,11 @@
   }
   button.gen:disabled { opacity: .5; }
   .genhint { color: var(--dim); font-size: 11.5px; }
+
+  .stale { color: var(--warn); font-size: 11px; white-space: nowrap; }
+  .fresh { color: var(--dim); font-size: 11px; white-space: nowrap; }
+  .decayed { color: var(--warn); }
+  .wasscore { color: var(--dim); text-decoration: line-through; font-size: 11px; }
 </style>
 </head>
 <body>
@@ -191,6 +196,7 @@
           <th class="num">₹ at risk</th>
           <th>Trust score</th>
           <th class="num">Evidence</th>
+          <th>Last audit</th>
           <th>Gate</th>
           <th>Why</th>
         </tr>
@@ -356,9 +362,18 @@ function renderCategories(d) {
       <td class="num">${money(c.at_risk_minor)}</td>
       <td>
         <div class="bar-track"><div class="bar-fill" style="width:${(c.score * 100).toFixed(0)}%"></div></div>
-        <div class="sev">${c.score.toFixed(2)}</div>
+        <div class="sev ${c.is_decaying ? "decayed" : ""}">${c.score.toFixed(2)}${
+          c.is_decaying ? ` <span class="wasscore">${c.base_score.toFixed(2)}</span>` : ""
+        }</div>
       </td>
       <td class="num">${c.sample_size} / ${c.min_sample_size}<div class="sev">${pct}%</div></td>
+      <td>${
+        c.days_since_audit === null
+          ? '<span class="fresh">never</span>'
+          : c.is_decaying
+            ? `<span class="stale">${c.days_since_audit.toFixed(0)}d &middot; decaying</span>`
+            : `<span class="fresh">${c.days_since_audit.toFixed(0)}d ago</span>`
+      }</td>
       <td><span class="pill ${pillClass(c.gate_decision)}">${esc(c.gate_decision)}</span></td>
       <td class="why">${
         c.auto_resolvable
@@ -367,7 +382,7 @@ function renderCategories(d) {
       }</td>
     </tr>
     <tr class="drillrow" data-for="${esc(c.code)}" hidden>
-      <td class="drill" colspan="7"></td>
+      <td class="drill" colspan="8"></td>
     </tr>`;
   }).join("");
 

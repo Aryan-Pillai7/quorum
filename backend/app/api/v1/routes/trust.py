@@ -15,7 +15,7 @@ from app.api.deps import get_db
 from app.config import Settings, get_settings
 from app.models import DiscrepancyCategory, TrustScore
 from app.schemas.trust import TrustCategoryListResponse, TrustCategoryResponse
-from app.services.trust import decide_gate
+from app.services.trust import gate_for_trust_row
 
 router = APIRouter(prefix="/trust", tags=["trust"])
 
@@ -63,7 +63,7 @@ def _to_response(
     review_threshold = trust.review_threshold if trust else settings.default_review_threshold
     min_sample = trust.min_sample_size if trust else settings.default_min_sample_size
 
-    evaluation = decide_gate(
+    evaluation, _decay = gate_for_trust_row(
         score=score,
         sample_size=sample_size,
         correct_count=correct_count,
@@ -71,6 +71,9 @@ def _to_response(
         review_threshold=review_threshold,
         min_sample_size=min_sample,
         category_auto_resolvable=category.auto_resolvable,
+        last_audit_at=trust.last_evaluated_at if trust else None,
+        grace_days=settings.trust_decay_grace_days,
+        decay_days=settings.trust_decay_days,
     )
 
     return TrustCategoryResponse(

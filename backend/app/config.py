@@ -72,6 +72,12 @@ class Settings(BaseSettings):
     # (ADR-0025). Approvals that would move a gate state are audited at 100% regardless.
     audit_baseline_rate: float = Field(default=0.2, ge=0.0, le=1.0)
 
+    # Trust decay on silence (ADR-0030). Grace: how long a category may go without an
+    # audited observation before its score starts being discounted. Decay: how long the
+    # discount then takes to reach the review-threshold floor. Judgement calls.
+    trust_decay_grace_days: int = Field(default=14, ge=1)
+    trust_decay_days: int = Field(default=28, ge=1)
+
     # Demo-grade auth for the operational write endpoints only (ADR-0028). One shared
     # bearer token, no users, no roles, no expiry. Absent means those endpoints are
     # disabled rather than open: a missing token must never read as "no auth needed".

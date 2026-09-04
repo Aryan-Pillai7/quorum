@@ -35,7 +35,7 @@ from app.services.agent.prompts import (
     build_batch_prompt,
 )
 from app.services.agent.schema import RESPONSE_SCHEMA, AgentBatchResponse, AgentExplanation
-from app.services.trust import GateEvaluation, decide_gate
+from app.services.trust import GateEvaluation, gate_for_trust_row
 
 logger = logging.getLogger(__name__)
 
@@ -150,9 +150,12 @@ def _gate_for(
     (ADR-0027): category trust says how often this KIND of problem is judged correctly, and
     says nothing about what one mistake on a large amount would cost.
     """
-    return decide_gate(
+    evaluation, _decay = gate_for_trust_row(
         amount_minor=amount_minor,
         high_value_threshold_minor=settings.high_value_review_threshold_minor,
+        last_audit_at=trust.last_evaluated_at if trust else None,
+        grace_days=settings.trust_decay_grace_days,
+        decay_days=settings.trust_decay_days,
         score=trust.score if trust else 0,
         sample_size=trust.sample_size if trust else 0,
         correct_count=trust.correct_count if trust else 0,
@@ -165,6 +168,7 @@ def _gate_for(
         min_sample_size=trust.min_sample_size if trust else settings.default_min_sample_size,
         category_auto_resolvable=category.auto_resolvable,
     )
+    return evaluation
 
 
 def _observations_needed(trust: TrustScore | None, settings: Settings) -> int:
