@@ -57,7 +57,31 @@ class Settings(BaseSettings):
     default_review_threshold: float = Field(default=0.60, ge=0.0, le=1.0)
     default_min_sample_size: int = Field(default=50, ge=1)
 
-    @field_validator("gemini_api_key", mode="before")
+    # Amounts at or above this are always human-reviewed, whatever a category has earned
+    # (ADR-0027). INR 2,000.00 in paise. A judgement call sized so a meaningful share of
+    # real settlements clears it, not a calibrated value.
+    high_value_review_threshold_minor: int = Field(default=200_000, ge=0)
+
+    # Exponential moving average weight for trust recalibration (ADR-0026). At 0.2 a
+    # category recovers from a bad run in a handful of observations rather than being
+    # anchored by its whole history, which is the behaviour wanted when a processor
+    # changes something and the old evidence stops describing reality.
+    trust_ema_alpha: float = Field(default=0.2, gt=0.0, le=1.0)
+
+    # Share of trust-neutral approvals audited anyway, to keep an unbiased baseline
+    # (ADR-0025). Approvals that would move a gate state are audited at 100% regardless.
+    audit_baseline_rate: float = Field(default=0.2, ge=0.0, le=1.0)
+
+    # Demo-grade auth for the operational write endpoints only (ADR-0028). One shared
+    # bearer token, no users, no roles, no expiry. Absent means those endpoints are
+    # disabled rather than open: a missing token must never read as "no auth needed".
+    operator_token: str | None = None
+
+    @property
+    def approvals_enabled(self) -> bool:
+        return bool(self.operator_token)
+
+    @field_validator("gemini_api_key", "operator_token", mode="before")
     @classmethod
     def _blank_key_is_no_key(cls, value: str | None) -> str | None:
         """Treat an empty or whitespace-only key as absent.

@@ -22,6 +22,7 @@ EXPECTED_TABLES = {
     "ingestion_batches",
     "quarantined_rows",
     "settlement_groups",
+    "approvals",
 }
 
 
@@ -191,3 +192,23 @@ def test_the_one_to_one_match_legs_are_untouched_by_phase_4():
     for leg in ("psp_transaction_id", "bank_transaction_id", "ledger_transaction_id"):
         assert leg in columns
         assert columns[leg].nullable is True
+
+
+def test_one_approval_per_finding():
+    """Two approvals on one finding would double-count as evidence (ADR-0025)."""
+    unique = {
+        tuple(c.name for c in uc.columns)
+        for uc in Base.metadata.tables["approvals"].constraints
+        if uc.__class__.__name__ == "UniqueConstraint"
+    }
+    assert ("discrepancy_id",) in unique
+
+
+def test_an_audited_approval_must_name_its_auditor():
+    """An anonymous audit is not evidence, and this is the row that moves a score."""
+    check_names = {
+        c.name
+        for c in Base.metadata.tables["approvals"].constraints
+        if c.__class__.__name__ == "CheckConstraint"
+    }
+    assert "ck_approvals_audited_rows_name_their_auditor" in check_names

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from app.api.v1.routes import health, reconcile, trust
+from app.api.v1.routes import approvals, health, reconcile, trust
 
 root_router = APIRouter()
 root_router.include_router(health.router)
@@ -16,3 +16,4 @@ root_router.include_router(health.router)
 v1_router = APIRouter(prefix="/v1")
 v1_router.include_router(trust.router)
 v1_router.include_router(reconcile.router)
+v1_router.include_router(approvals.router)

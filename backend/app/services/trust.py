@@ -45,6 +45,8 @@ def decide_gate(
     review_threshold: Decimal | float,
     min_sample_size: int,
     category_auto_resolvable: bool,
+    amount_minor: int | None = None,
+    high_value_threshold_minor: int | None = None,
 ) -> GateEvaluation:
     """Decide whether an agent proposal may be applied automatically.
 
@@ -55,10 +57,16 @@ def decide_gate(
        policy ceiling, not a confidence judgement -- MISSING_IN_BANK stays human-reviewed
        even at a perfect score, because being right 100 times does not make the 101st
        misdirected payout acceptable to auto-close.
-    2. Below `min_sample_size` the score is not evidence. Cold start caps at HUMAN_REVIEW,
+    2. A large enough amount is always reviewed, whatever the category has earned
+       (ADR-0027). Trust is measured per category, so it says how often the system is
+       right about that *kind* of problem -- it says nothing about how much a single
+       mistake would cost. A category at 0.99 over ten thousand observations is still
+       wrong one time in a hundred, and that hundredth case should not be a large payout
+       closing itself.
+    3. Below `min_sample_size` the score is not evidence. Cold start caps at HUMAN_REVIEW,
        never BLOCK: a new category with no history should not halt the pipeline, it should
        route to a person.
-    3. Then, and only then, the score is compared against thresholds.
+    4. Then, and only then, the score is compared against thresholds.
     """
     score_d = Decimal(str(score))
     auto_d = Decimal(str(auto_apply_threshold))
@@ -80,12 +88,34 @@ def decide_gate(
     if min_sample_size < 1:
         raise ValueError(f"min_sample_size must be at least 1, got {min_sample_size}")
 
+    if amount_minor is not None and amount_minor < 0:
+        # Callers pass a magnitude; a signed delta would make the comparison below depend
+        # on which direction the money went, which is not what the rule is about.
+        amount_minor = abs(amount_minor)
+
     cold_start = sample_size < min_sample_size
 
     if not category_auto_resolvable:
         return GateEvaluation(
             decision=GateDecision.HUMAN_REVIEW,
             reason="category is not eligible for automation regardless of trust score",
+            score=score_d,
+            sample_size=sample_size,
+            is_cold_start=cold_start,
+        )
+
+    if (
+        amount_minor is not None
+        and high_value_threshold_minor is not None
+        and amount_minor >= high_value_threshold_minor
+    ):
+        return GateEvaluation(
+            decision=GateDecision.HUMAN_REVIEW,
+            reason=(
+                f"amount {amount_minor} minor units is at or above the "
+                f"{high_value_threshold_minor} high-value review threshold; large amounts "
+                f"are always reviewed regardless of what the category has earned"
+            ),
             score=score_d,
             sample_size=sample_size,
             is_cold_start=cold_start,

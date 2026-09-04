@@ -123,3 +123,25 @@ class GroupMethod(StrEnum):
 
     SHARED_REFERENCE = "SHARED_REFERENCE"  # all rows carry the credit's settlement UTR
     SUBSET_SUM = "SUBSET_SUM"              # bounded search over a candidate window
+
+
+class ApprovalDecision(StrEnum):
+    """What a human did with an agent-drafted correction."""
+
+    APPROVED = "APPROVED"                  # accepted the draft as written
+    EDITED_APPROVED = "EDITED_APPROVED"    # accepted, but rewrote the action first
+    REJECTED = "REJECTED"                  # the draft was wrong
+
+
+class AuditStatus(StrEnum):
+    """Whether a second human has verified an approval, and what they found.
+
+    Only CORRECT and INCORRECT move a trust score. An approval clears a finding
+    operationally the moment it is made; it earns the right to affect trust only once
+    somebody has checked it (ADR-0025).
+    """
+
+    NOT_SELECTED = "NOT_SELECTED"  # outside the audit sample; never affects trust
+    PENDING = "PENDING"            # selected for audit, not yet reviewed
+    CORRECT = "CORRECT"
+    INCORRECT = "INCORRECT"

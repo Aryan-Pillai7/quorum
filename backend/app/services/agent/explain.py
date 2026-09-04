@@ -138,9 +138,21 @@ def validate_batch_response(
     return accepted, problems
 
 
-def _gate_for(category: DiscrepancyCategory, trust: TrustScore | None, settings: Settings):
-    """Trust gate evaluation for a category, with the fallback for an unscored one."""
+def _gate_for(
+    category: DiscrepancyCategory,
+    trust: TrustScore | None,
+    settings: Settings,
+    amount_minor: int | None = None,
+):
+    """Trust gate evaluation for one finding, with the fallback for an unscored category.
+
+    The finding's own delta is passed so the high-value fail-safe applies per transaction
+    (ADR-0027): category trust says how often this KIND of problem is judged correctly, and
+    says nothing about what one mistake on a large amount would cost.
+    """
     return decide_gate(
+        amount_minor=amount_minor,
+        high_value_threshold_minor=settings.high_value_review_threshold_minor,
         score=trust.score if trust else 0,
         sample_size=trust.sample_size if trust else 0,
         correct_count=trust.correct_count if trust else 0,
@@ -234,7 +246,9 @@ def explain_discrepancies(
         # property of Quorum's measured trust in the category, not of the model replying.
         gated: dict[str, tuple] = {}
         for discrepancy, match, category, trust in batch:
-            evaluation: GateEvaluation = _gate_for(category, trust, settings)
+            evaluation: GateEvaluation = _gate_for(
+                category, trust, settings, amount_minor=discrepancy.delta_minor
+            )
             gated[str(discrepancy.id)] = (discrepancy, match, category, trust, evaluation)
 
         items = [

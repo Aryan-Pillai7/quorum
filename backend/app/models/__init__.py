@@ -5,11 +5,14 @@ schema-invariant tests inspect it. A model that is not imported here is invisibl
 migrations, which is a silent and expensive failure mode.
 """
 
+from app.models.approval import Approval
 from app.models.audit_event import AuditEvent
 from app.models.discrepancy import NOVEL_CATEGORY_CODE, Discrepancy
 from app.models.discrepancy_category import DiscrepancyCategory
 from app.models.enums import (
     ActorType,
+    ApprovalDecision,
+    AuditStatus,
     BatchStatus,
     DetectedBy,
     Direction,
@@ -32,7 +35,10 @@ from app.models.trust_score import TrustScore
 __all__ = [
     "NOVEL_CATEGORY_CODE",
     "ActorType",
+    "Approval",
+    "ApprovalDecision",
     "AuditEvent",
+    "AuditStatus",
     "BatchStatus",
     "DetectedBy",
     "Direction",
