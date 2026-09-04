@@ -20,7 +20,7 @@ Two of three agreeing is a lead. Three agreeing is a reconciliation.
 
 ---
 
-## Status: Phase 7 (category drill-down) complete
+## Status: Phase 8 (trust decay on silence) complete
 
 - ✅ Postgres schema with migrations and a seeded 17-category discrepancy taxonomy
 - ✅ Trust-gate policy logic, with tests
@@ -34,7 +34,8 @@ Two of three agreeing is a lead. Three agreeing is a reconciliation.
 - ✅ Hash-chained audit trail, safe cache invalidation, CI
 - ✅ Approval loop — audited human feedback moves trust scores
 - ✅ Category drill-down — the math and the narrative, side by side
-- ⬜ Maintenance-mode override, drift detection, backlog decay
+- ✅ Trust decays when audits stop arriving
+- ⬜ Maintenance-mode override, drift-spike detection
 
 **Every trust score in the database is still a cold-start seed at `sample_size = 0`.** No
 human has confirmed or overridden an agent proposal yet, so nothing has been scored. The
@@ -90,6 +91,59 @@ and a guess.
 ---
 
 ---
+
+---
+
+---
+
+## Phase 8 results — trust decay on silence
+
+Phase 6 made trust move on audited feedback. Nothing reacted to feedback *stopping*, so a
+category that earned `AUTO_APPLY` kept it indefinitely on evidence that could be months
+old. Trust is a claim about how often the system is *currently* right, and that claim
+weakens with age whether or not anything writes it down.
+
+`TIMING_DIFFERENCE`, holding a real earned score of 0.9988 over 30 audited observations:
+
+| Days since last audit | Effective score | Gate |
+|---:|---:|---|
+| 0–14 | 0.9988 | `AUTO_APPLY` |
+| 21 | 0.8741 | **`HUMAN_REVIEW`** |
+| 28 | 0.7494 | `HUMAN_REVIEW` |
+| 42+ | 0.5000 (floor) | `HUMAN_REVIEW` |
+
+14 days grace, then 28 days to the floor. Automation is lost about three weeks after the
+last audit; the score bottoms out at six.
+
+### Why read-time, not a scheduled job
+
+**A cron that silently stops running leaves every score stale-high** — failing toward
+permissive, the one direction a trust system must never fail. Read-time decay cannot get
+stuck: if a score can be read at all, its discount has been applied, because computing it
+*is* reading it.
+
+It also never mutates the stored score. The record of what the audits actually found stays
+intact, and a single fresh audit restores automation by moving one timestamp.
+
+### Three properties that hold by construction
+
+- **Decay only ever pulls down.** Silence is not evidence of correctness, so it can never
+  make a category more automatable than its audits justify.
+- **The floor is the review threshold, not zero.** Losing automation is the point; halting
+  the pipeline is not. Decaying to `BLOCK` would stop surfacing suggestions entirely.
+- **A category with no audited observations does not decay.** Cold start and gone-quiet are
+  different situations; conflating them would report every new category as degrading.
+
+Decay composes *underneath* the policy ceiling and the high-value fail-safe (ADR-0027),
+both of which short-circuit before the score is consulted — so a discounted score cannot
+make either more permissive.
+
+### Visible, not silent
+
+The category table shows days since last audit, flags decaying categories, and shows the
+discounted score next to the struck-through earned one. A decaying category appears **even
+with no open findings** — going quiet usually means no findings arrived either, and hiding
+it would defeat the point for exactly the categories most worth noticing.
 
 ---
 
