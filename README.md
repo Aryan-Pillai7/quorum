@@ -20,7 +20,7 @@ Two of three agreeing is a lead. Three agreeing is a reconciliation.
 
 ---
 
-## Status: Phase 2 (deterministic engine) complete
+## Status: Phase 3 (demo layer) complete
 
 - ✅ Postgres schema with migrations and a seeded 17-category discrepancy taxonomy
 - ✅ Trust-gate policy logic, with tests
@@ -28,12 +28,109 @@ Two of three agreeing is a lead. Three agreeing is a reconciliation.
 - ✅ Docker Compose stack that comes up clean from a fresh clone
 - ✅ CSV ingestion with per-row quarantine and batch tracking
 - ✅ Deterministic three-way matching engine with multi-label classification
-- ⬜ Claude-backed explanation and classification (Phase 3)
+- ✅ Gemini explanation layer, gated and advisory-only
+- ✅ `POST /v1/reconcile` and a dashboard rendering real data
 - ⬜ Trust scores learning from real outcomes (Phase 4)
 
 **Every trust score in the database is still a cold-start seed at `sample_size = 0`.** No
-agent has proposed anything yet, so nothing has been scored. The API says so on every
-response rather than presenting zeros as scores.
+human has confirmed or overridden an agent proposal yet, so nothing has been scored. The
+dashboard shows "auto-applied by AI: ₹0.00" — that zero is real, and it is the point.
+
+---
+
+## The 60-second demo
+
+```bash
+docker compose up -d db cache
+cd backend
+.venv/Scripts/python.exe -m alembic upgrade head
+.venv/Scripts/python.exe scripts/seed_demo.py       # 1,468 rows in, reconciled
+.venv/Scripts/python.exe scripts/explain_all.py     # 131 findings explained, 9 API calls
+.venv/Scripts/python.exe -m uvicorn app.main:app --port 8000
+```
+
+Open <http://localhost:8000/> for the dashboard.
+
+**The story it tells.** Two findings, both explained by the model with self-reported
+*high* confidence, both held back — for completely different reasons:
+
+| | `ord_00503` — timing difference | `ord_00480` — duplicate settlement |
+|---|---|---|
+| What the rules found | bank credited 1 day late, amounts agree | order settled twice, ₹1,657.80 each |
+| What the agent says | "standard timing delay within the 2-day window; no action required" | "verify with the processor; if confirmed, initiate a refund for the excess" |
+| Model confidence | high | high |
+| **Gate decision** | **HUMAN_REVIEW** | **HUMAN_REVIEW** |
+| **Why** | eligible for automation in principle, but has **0 of 30** observations — the score is not yet evidence | **never** auto-applied at any score. A policy ceiling, not a confidence judgement |
+
+That contrast is the argument. The model is confident about both. The system automates
+neither, and can say precisely why for each — one needs evidence it has not gathered, the
+other will never be allowed regardless of how much evidence it gathers.
+
+`GET /v1/narrated` returns exactly these two cases as JSON.
+
+---
+
+---
+
+## Phase 3 results — the agent layer
+
+Measured 2026-09-04 against the same `recon_2026_03` fixture, on the real API.
+
+| | |
+|---|---:|
+| Findings explained | **131 / 131** |
+| Gemini API calls | **9** (one per discrepancy category) |
+| Total API time | **51 s** |
+| Retries needed | **0** |
+| Failed batches | **0** |
+| Model | `gemini-3.1-flash-lite` |
+
+Batching by category is what makes that ratio possible: call count scales with the number
+of *kinds* of problem, not the number of rows. Per-finding calls would have been 131
+requests — see the quota note below for why that matters more than it sounds.
+
+**Every one of those 131 findings is advisory.** Each carries `advisory_only: true`, and
+every one passed through the trust gate. `AUTO_APPLY` was returned zero times, because no
+category has the observations to earn it.
+
+### Endpoints
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /v1/reconcile` | match, explain, gate, audit — the whole pipeline |
+| `GET /v1/dashboard` | panel data, computed from stored rows |
+| `GET /v1/narrated` | the two worked examples above |
+| `GET /v1/discrepancies` | findings with explanation and gate decision |
+| `GET /v1/trust/categories` | taxonomy with trust scores |
+| `GET /health`, `/health/ready` | liveness, readiness |
+
+### What is NOT true of this layer
+
+- **The AI resolves nothing.** It explains and proposes. Nothing it produces is applied,
+  and in Phase 3 nothing *can* be: every category is at zero observations, so the gate
+  cannot return `AUTO_APPLY` for anything at all. The write path that would apply an
+  approved action does not exist yet.
+- **Explanations are not verified.** They are grounded structurally — the prompt carries
+  only the field comparisons the engine recorded, and nothing else — but no automated
+  check confirms a given explanation is factually correct. Validation covers structure
+  (right ids, no blanks, within length), not truth. The deterministic finding is shown
+  alongside every explanation precisely so a reviewer can check it.
+- **`model_confidence` is self-reported and gates nothing.** It is the model's claim about
+  its own answer. The trust score is what Quorum has measured. They are deliberately kept
+  as separate fields and separate words.
+- **The free tier allows 20 requests per day, per model.** Not per minute — that was my
+  first wrong assumption from the 429s. At 9 calls per pass, that is two full passes a
+  day. Explanations are therefore cached in the audit trail and re-runs skip what is
+  already explained; the dashboard reads stored rows and needs no live call. A demo that
+  needs a fresh pass on a spent quota will not get one.
+- **Latency is not demo-safe without the cache.** A cold full pass takes ~51 s. `POST
+  /v1/reconcile` on a warm database returns in well under a second because it skips what
+  is explained.
+- **The audit trail is append-only by convention only.** No hash chain, no trigger
+  blocking `UPDATE` or `DELETE` (ADR-0008). It records every reconcile run, every agent
+  batch with its latency and token counts, and every finding's gate decision — but it is
+  not tamper-evident and should not be described as such.
+- **No authentication on any endpoint,** including the ones that spend API quota.
 
 ---
 
@@ -197,7 +294,11 @@ backend/
     db/                  engine, session, declarative base + naming convention
     models/              SQLAlchemy ORM (how data is stored)
     schemas/             Pydantic (how data is sent) — deliberately separate
+    static/              dashboard.html, served by the API itself
     services/
+      agent/             Gemini layer — prompts, schema, client, batching
+      reporting.py       dashboard aggregation
+      audit.py           the single write path for audit events
       ingestion/         CSV adapters + batch runner with quarantine
       matching/          deterministic engine — sealed, no AI imports
         rules.py         11 classification rules, pure functions
