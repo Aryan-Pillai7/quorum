@@ -6,7 +6,16 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import BigInteger, DateTime, Enum, Index, String, Text, UniqueConstraint
+from sqlalchemy import (
+    BigInteger,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Index,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -35,12 +44,32 @@ class Transaction(Base, TimestampMixin):
     # ledger entry id. Unique per source, which is what makes re-ingesting a file safe.
     external_id: Mapped[str] = mapped_column(String(128), nullable=False)
 
-    # The value the three sources are expected to share: UTR / RRN / bank reference.
-    # Nullable because bank statements frequently omit it -- that absence is exactly
-    # what forces the fallback amount+date matching pass in Phase 2.
+    # Which ingestion run produced this row. Nullable only because Phase 1 rows predate
+    # batch tracking; everything ingested from Phase 2 onward carries one.
+    batch_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("ingestion_batches.id", ondelete="RESTRICT"), nullable=True
+    )
+
+    # The BANK-NETWORK reference: UTR / RRN. Shared by the PSP settlement row and the
+    # bank statement line. A ledger entry has none, which is why it cannot be joined to
+    # the bank directly and the settlement report has to act as the pivot.
     counterparty_ref: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
+    # The COMMERCE reference: order id. Shared by the PSP settlement row and the ledger
+    # entry. A bank statement line has none.
+    order_ref: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
+    # Normalized to what this source asserts actually moved, so all three are directly
+    # comparable: PSP net settled, bank credit, ledger gross minus expected fee.
     amount_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+    # Pre-fee amount and the fee itself, where the source states them. Nullable because a
+    # bank statement states neither. Keeping them typed rather than buried in `raw` is
+    # what lets fee variance be detected as its own finding instead of surfacing as an
+    # unexplained amount mismatch.
+    gross_amount_minor: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    fee_minor: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
     direction: Mapped[Direction] = mapped_column(
         Enum(Direction, native_enum=False, create_constraint=True, name="direction", length=16),
@@ -76,6 +105,8 @@ class Transaction(Base, TimestampMixin):
         # conflicts instead of duplicating.
         UniqueConstraint("source", "external_id", name="uq_transactions_source_external_id"),
         Index("ix_transactions_counterparty_ref", "counterparty_ref"),
+        Index("ix_transactions_order_ref", "order_ref"),
+        Index("ix_transactions_batch_id", "batch_id"),
         Index("ix_transactions_source_occurred_at", "source", "occurred_at"),
         Index("ix_transactions_status", "status"),
         # Amount+date fallback matching scans this; without it that pass is a seq scan.

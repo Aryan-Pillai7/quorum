@@ -37,6 +37,25 @@ pytestmark = pytest.mark.integration
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
 
+def _expected_category_count() -> int:
+    """Categories the migrations declare they seed, minus the one 0002 retires."""
+    import importlib.util
+
+    def _load(name: str):
+        path = BACKEND_ROOT / "alembic" / "versions" / f"{name}.py"
+        spec = importlib.util.spec_from_file_location(name, path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    initial = _load("0001_initial_schema")
+    phase2 = _load("0002_ingestion_and_discrepancies")
+    return len(initial.CATEGORIES) + len(phase2.NEW_CATEGORIES) - 1  # 0002 drops UNCLASSIFIED
+
+
+EXPECTED_CATEGORY_COUNT = _expected_category_count()
+
+
 def _admin_engine():
     """Engine bound to the maintenance database, used to CREATE/DROP the scratch one."""
     url = make_url(get_settings().database_url).set(database="postgres")
@@ -139,9 +158,35 @@ def test_seed_data_covers_every_category_with_a_trust_row(migrated_engine):
             )
         ).scalar_one()
 
-    assert categories == 14, f"expected the seeded taxonomy of 14 categories, found {categories}"
+    # Derived from the migrations' declared seed lists rather than hardcoded, so adding a
+    # category does not require editing this test. Still a real assertion: it fails if a
+    # bulk_insert did not land, or if the UNCLASSIFIED deletion in 0002 did not run.
+    assert categories == EXPECTED_CATEGORY_COUNT, (
+        f"expected {EXPECTED_CATEGORY_COUNT} seeded categories, found {categories}"
+    )
     assert trust_rows == categories
     assert orphans == 0, "every category needs a trust row, or its gate decision is undefined"
+
+
+def test_novel_replaced_unclassified(migrated_engine):
+    """0002 retires UNCLASSIFIED in favour of __novel__, which reads as the absence of a
+    classification rather than as a peer category."""
+    with migrated_engine.connect() as conn:
+        codes = {
+            row[0]
+            for row in conn.execute(text("SELECT code FROM discrepancy_categories")).fetchall()
+        }
+    assert "__novel__" in codes
+    assert "UNCLASSIFIED" not in codes
+
+
+def test_novel_category_can_never_auto_apply(migrated_engine):
+    """Automating what no rule understood is the exact failure this system exists to avoid."""
+    with migrated_engine.connect() as conn:
+        auto_resolvable = conn.execute(
+            text("SELECT auto_resolvable FROM discrepancy_categories WHERE code = '__novel__'")
+        ).scalar_one()
+    assert auto_resolvable is False
 
 
 def test_every_seeded_trust_score_starts_cold(migrated_engine):

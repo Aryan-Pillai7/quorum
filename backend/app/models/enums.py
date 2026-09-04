@@ -70,3 +70,38 @@ class ActorType(StrEnum):
     SYSTEM = "SYSTEM"
     AGENT = "AGENT"
     USER = "USER"
+
+
+class BatchStatus(StrEnum):
+    """Lifecycle of one ingestion run."""
+
+    PENDING = "PENDING"
+    COMPLETED = "COMPLETED"  # finished; may still have quarantined rows
+    FAILED = "FAILED"        # aborted before completion, e.g. unreadable file
+
+
+class QuarantineReason(StrEnum):
+    """Why a source row was set aside instead of ingested.
+
+    A malformed row is quarantined with a reason, never silently dropped and never
+    allowed to abort the batch: one bad date in a 500-row settlement file must not cost
+    the other 499 rows.
+    """
+
+    MISSING_REQUIRED_FIELD = "MISSING_REQUIRED_FIELD"
+    INVALID_AMOUNT = "INVALID_AMOUNT"
+    INVALID_DATE = "INVALID_DATE"
+    UNSUPPORTED_CURRENCY = "UNSUPPORTED_CURRENCY"
+    DUPLICATE_IN_BATCH = "DUPLICATE_IN_BATCH"
+    MALFORMED_ROW = "MALFORMED_ROW"
+
+
+class DetectedBy(StrEnum):
+    """What produced a discrepancy finding.
+
+    Kept separate from the finding itself so that "a rule found this" is never
+    confusable with "a model suggested this" when reading the audit trail.
+    """
+
+    DETERMINISTIC = "DETERMINISTIC"
+    AGENT = "AGENT"  # Phase 3; nothing writes this yet

@@ -16,8 +16,11 @@ EXPECTED_TABLES = {
     "transactions",
     "match_records",
     "discrepancy_categories",
+    "discrepancies",
     "trust_scores",
     "audit_events",
+    "ingestion_batches",
+    "quarantined_rows",
 }
 
 
@@ -40,7 +43,10 @@ def test_no_float_columns_anywhere():
 def test_money_columns_are_bigint_minor_units():
     money_columns = [
         ("transactions", "amount_minor"),
+        ("transactions", "gross_amount_minor"),
+        ("transactions", "fee_minor"),
         ("match_records", "amount_delta_minor"),
+        ("discrepancies", "delta_minor"),
         ("discrepancy_categories", "tolerance_minor"),
     ]
     for table_name, column_name in money_columns:
@@ -113,3 +119,43 @@ def test_match_records_reject_zero_legs():
 def test_audit_events_have_no_updated_at_column():
     """Append-only: an updated_at on an audit row would be permanently a lie (ADR-0008)."""
     assert "updated_at" not in Base.metadata.tables["audit_events"].columns
+
+
+def test_match_records_no_longer_carry_a_single_category():
+    """ADR-0012 supersedes ADR-0007: findings live in `discrepancies`, one row per rule.
+
+    A settlement row can be late and short on fee at once, and a single column would
+    force discarding one of two true statements.
+    """
+    assert "category_code" not in Base.metadata.tables["match_records"].columns
+
+
+def test_a_match_can_carry_several_findings_but_not_two_from_one_rule():
+    """Multi-label is the point; duplicate findings from one rule are not."""
+    unique = {
+        tuple(c.name for c in uc.columns)
+        for uc in Base.metadata.tables["discrepancies"].constraints
+        if uc.__class__.__name__ == "UniqueConstraint"
+    }
+    assert ("match_record_id", "rule_id") in unique
+    match_fk = [
+        c.name
+        for c in Base.metadata.tables["discrepancies"].columns
+        if c.name == "match_record_id"
+    ]
+    assert match_fk, "discrepancies must reference a match record"
+
+
+def test_ingestion_batch_row_counts_must_reconcile():
+    """A batch whose counts do not add up makes every derived number unreliable."""
+    check_names = {
+        c.name
+        for c in Base.metadata.tables["ingestion_batches"].constraints
+        if c.__class__.__name__ == "CheckConstraint"
+    }
+    assert "ck_ingestion_batches_row_counts_reconcile" in check_names
+
+
+def test_quarantined_rows_are_write_once():
+    """Like audit rows: written once with a reason, never revised."""
+    assert "updated_at" not in Base.metadata.tables["quarantined_rows"].columns

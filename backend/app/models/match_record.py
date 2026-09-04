@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from typing import Any
 
 from sqlalchemy import (
     BigInteger,
@@ -14,6 +15,7 @@ from sqlalchemy import (
     String,
     Text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin, uuid_pk
@@ -65,10 +67,15 @@ class MatchRecord(Base, TimestampMixin):
         BigInteger, nullable=False, default=0, server_default="0"
     )
 
-    # Phase 1 carries a single category (ADR-0007). A match can realistically have
-    # several simultaneous findings; Phase 2 normalizes this into a discrepancies table.
-    category_code: Mapped[str | None] = mapped_column(
-        ForeignKey("discrepancy_categories.code", ondelete="RESTRICT"), nullable=True
+    # Findings live in the `discrepancies` table, one row per rule that fired
+    # (ADR-0012 supersedes ADR-0007). A match can be both late and short on fee, and
+    # forcing that into one column would mean discarding one of two true statements.
+
+    # How the legs were joined: which field was compared for each leg, and by which pass.
+    # This is the traceability record for the match itself, as distinct from the
+    # per-finding evidence on each discrepancy row.
+    evidence: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default="{}"
     )
 
     # Human-readable summary of the rule outcome. Deterministic text only; agent-written
@@ -78,7 +85,9 @@ class MatchRecord(Base, TimestampMixin):
     psp_transaction = relationship(Transaction, foreign_keys=[psp_transaction_id])
     bank_transaction = relationship(Transaction, foreign_keys=[bank_transaction_id])
     ledger_transaction = relationship(Transaction, foreign_keys=[ledger_transaction_id])
-    category = relationship("DiscrepancyCategory")
+    discrepancies = relationship(
+        "Discrepancy", back_populates="match_record", cascade="all, delete-orphan"
+    )
 
     __table_args__ = (
         # A transaction belongs to at most one match. Postgres permits unlimited NULLs
