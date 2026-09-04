@@ -161,6 +161,13 @@ def _detect_settlement_groups(
         if txn.counterparty_ref:
             psp_by_ref[txn.counterparty_ref].append(txn)
 
+    # A settlement row whose reference matches some bank credit is matchable 1:1 by
+    # reference, so it has no business in a subset-sum pool. Excluding those is what makes
+    # the search viable at all: on the fixture it takes the candidate pool from 87-166
+    # rows -- far past the cap, so the search refused to start -- down to 3-13. Date and
+    # currency bounds alone are nowhere near selective enough on real volumes.
+    bank_refs = {t.counterparty_ref for t in bank_rows if t.counterparty_ref}
+
     results: list[AggregationResult] = []
     claimed: set[str] = set()  # settlement rows already inside a resolved group
 
@@ -177,7 +184,12 @@ def _detect_settlement_groups(
         elif not sharing and ref:
             # No settlement row carries this credit's reference, so a 1:1 reference match
             # is impossible and the search is the only remaining explanation.
-            available = [t for t in psp_rows if str(t.id) not in claimed]
+            available = [
+                t
+                for t in psp_rows
+                if str(t.id) not in claimed
+                and (not t.counterparty_ref or t.counterparty_ref not in bank_refs)
+            ]
             result = group_by_subset_sum(
                 _to_bank_credit(bank),
                 [_to_candidate(t) for t in available],
@@ -347,7 +359,11 @@ def reconcile(
         if txn.order_ref:
             psp_by_order[txn.order_ref].append(txn)
 
-    consumed: set[str] = set()  # transaction ids already attached to a match record
+    # Transaction ids as STRINGS throughout. The aggregation dataclasses carry string
+    # ids while the ORM carries UUID objects, and a set holding both silently fails
+    # every membership test across the boundary -- which let the amount+date fallback
+    # re-claim a bank credit an aggregation group already held.
+    consumed: set[str] = set()
     records: list[tuple[MatchRecord, list[Finding]]] = []
 
     # --- Pass 0: aggregated payouts (ADR-0019) ------------------------------------------
@@ -372,7 +388,9 @@ def reconcile(
         anchor = min(psp_by_order.get(psp.order_ref or "", [psp]), key=lambda t: t.external_id)
         ledger = None
         if psp.order_ref and psp.id == anchor.id:
-            candidates = [t for t in ledger_by_order.get(psp.order_ref, []) if t.id not in consumed]
+            candidates = [
+                t for t in ledger_by_order.get(psp.order_ref, []) if str(t.id) not in consumed
+            ]
             ledger = candidates[0] if candidates else None
 
         group = group_by_psp_id.get(str(psp.id))
@@ -385,7 +403,7 @@ def reconcile(
             join_bank_by = "settlement_group"
         elif psp.counterparty_ref:
             candidates = [
-                t for t in bank_by_utr.get(psp.counterparty_ref, []) if t.id not in consumed
+                t for t in bank_by_utr.get(psp.counterparty_ref, []) if str(t.id) not in consumed
             ]
             if candidates:
                 bank = candidates[0]
@@ -475,16 +493,16 @@ def reconcile(
         )
         records.append((record, findings))
 
-        consumed.add(psp.id)
+        consumed.add(str(psp.id))
         if bank is not None:
-            consumed.add(bank.id)
+            consumed.add(str(bank.id))
         if ledger is not None:
-            consumed.add(ledger.id)
+            consumed.add(str(ledger.id))
 
     # --- Pass 2: bank and ledger rows the processor report never covered ---------------
     # With no processor row, these two share no reference field at all, so amount+date is
     # the only option available -- and it is scored accordingly.
-    leftover_ledger = [t for t in ledger_rows if t.id not in consumed]
+    leftover_ledger = [t for t in ledger_rows if str(t.id) not in consumed]
     for ledger in leftover_ledger:
         bank = _find_by_amount_and_date(ledger, bank_rows, consumed, fallback_window_days)
 
@@ -521,12 +539,12 @@ def reconcile(
             + (", ".join(f.rule_id for f in findings) or "none"),
         )
         records.append((record, findings))
-        consumed.add(ledger.id)
+        consumed.add(str(ledger.id))
         if bank is not None:
-            consumed.add(bank.id)
+            consumed.add(str(bank.id))
 
     # --- Pass 3: bank credits nothing accounts for -------------------------------------
-    for bank in [t for t in bank_rows if t.id not in consumed]:
+    for bank in [t for t in bank_rows if str(t.id) not in consumed]:
         ctx = MatchContext(
             psp=None,
             bank=_to_leg(bank),
@@ -555,7 +573,7 @@ def reconcile(
             notes="unattributed bank credit: no processor row and no ledger entry",
         )
         records.append((record, findings))
-        consumed.add(bank.id)
+        consumed.add(str(bank.id))
 
     return _persist(session, records, len(psp_rows), len(bank_rows), len(ledger_rows))
 
@@ -575,7 +593,7 @@ def _find_by_amount_and_date(
     viable = [
         t
         for t in candidates
-        if t.id not in consumed
+        if str(t.id) not in consumed
         and t.amount_minor == anchor.amount_minor
         and t.currency == anchor.currency
         and abs(t.occurred_at - anchor.occurred_at) <= window

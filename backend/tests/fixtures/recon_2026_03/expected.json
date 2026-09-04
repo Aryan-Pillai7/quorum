@@ -5,9 +5,9 @@
   "synthetic": true,
   "caveat": "Synthetic data with discrepancies planted by construction. A match rate measured here shows the engine implements these rules; it is not evidence about real settlement files. See ADR-0015.",
   "row_counts": {
-    "settlement_csv_rows": 500,
-    "bank_csv_rows": 492,
-    "ledger_csv_rows": 483
+    "settlement_csv_rows": 561,
+    "bank_csv_rows": 508,
+    "ledger_csv_rows": 544
   },
   "expected_quarantined": {
     "total": 7,
@@ -24,9 +24,222 @@
       "UNSUPPORTED_CURRENCY": 1
     }
   },
+  "expected_aggregations": {
+    "total": 16,
+    "by_expected_status": {
+      "AMBIGUOUS": 2,
+      "RESOLVED": 14
+    },
+    "by_expected_method": {
+      "SHARED_REFERENCE": 10,
+      "SUBSET_SUM": 6
+    },
+    "resolved_member_total": 55,
+    "groups": [
+      {
+        "payout_utr": "UTRPAYOUT0000",
+        "expected_method": "SHARED_REFERENCE",
+        "expected_status": "RESOLVED",
+        "member_count": 3,
+        "members": [
+          "pay_00504",
+          "pay_00505",
+          "pay_00506"
+        ],
+        "total_minor": 464782
+      },
+      {
+        "payout_utr": "UTRPAYOUT0001",
+        "expected_method": "SHARED_REFERENCE",
+        "expected_status": "RESOLVED",
+        "member_count": 4,
+        "members": [
+          "pay_00508",
+          "pay_00509",
+          "pay_00510",
+          "pay_00511"
+        ],
+        "total_minor": 755525
+      },
+      {
+        "payout_utr": "UTRPAYOUT0002",
+        "expected_method": "SHARED_REFERENCE",
+        "expected_status": "RESOLVED",
+        "member_count": 5,
+        "members": [
+          "pay_00513",
+          "pay_00514",
+          "pay_00515",
+          "pay_00516",
+          "pay_00517"
+        ],
+        "total_minor": 1085573
+      },
+      {
+        "payout_utr": "UTRPAYOUT0003",
+        "expected_method": "SHARED_REFERENCE",
+        "expected_status": "RESOLVED",
+        "member_count": 6,
+        "members": [
+          "pay_00519",
+          "pay_00520",
+          "pay_00521",
+          "pay_00522",
+          "pay_00523",
+          "pay_00524"
+        ],
+        "total_minor": 1550646
+      },
+      {
+        "payout_utr": "UTRPAYOUT0004",
+        "expected_method": "SHARED_REFERENCE",
+        "expected_status": "RESOLVED",
+        "member_count": 3,
+        "members": [
+          "pay_00526",
+          "pay_00527",
+          "pay_00528"
+        ],
+        "total_minor": 217977
+      },
+      {
+        "payout_utr": "UTRPAYOUT0005",
+        "expected_method": "SHARED_REFERENCE",
+        "expected_status": "RESOLVED",
+        "member_count": 4,
+        "members": [
+          "pay_00530",
+          "pay_00531",
+          "pay_00532",
+          "pay_00533"
+        ],
+        "total_minor": 1123713
+      },
+      {
+        "payout_utr": "UTRPAYOUT0006",
+        "expected_method": "SHARED_REFERENCE",
+        "expected_status": "RESOLVED",
+        "member_count": 5,
+        "members": [
+          "pay_00535",
+          "pay_00536",
+          "pay_00537",
+          "pay_00538",
+          "pay_00539"
+        ],
+        "total_minor": 1384870
+      },
+      {
+        "payout_utr": "UTRPAYOUT0007",
+        "expected_method": "SHARED_REFERENCE",
+        "expected_status": "RESOLVED",
+        "member_count": 6,
+        "members": [
+          "pay_00541",
+          "pay_00542",
+          "pay_00543",
+          "pay_00544",
+          "pay_00545",
+          "pay_00546"
+        ],
+        "total_minor": 898111
+      },
+      {
+        "payout_utr": "UTRPAYOUT0008",
+        "expected_method": "SHARED_REFERENCE",
+        "expected_status": "RESOLVED",
+        "member_count": 3,
+        "members": [
+          "pay_00548",
+          "pay_00549",
+          "pay_00550"
+        ],
+        "total_minor": 591109
+      },
+      {
+        "payout_utr": "UTRPAYOUT0009",
+        "expected_method": "SHARED_REFERENCE",
+        "expected_status": "RESOLVED",
+        "member_count": 4,
+        "members": [
+          "pay_00552",
+          "pay_00553",
+          "pay_00554",
+          "pay_00555"
+        ],
+        "total_minor": 1036416
+      },
+      {
+        "payout_utr": "UTRNOMATCH0000",
+        "expected_method": "SUBSET_SUM",
+        "expected_status": "RESOLVED",
+        "member_count": 3,
+        "members": [
+          "pay_00557",
+          "pay_00558",
+          "pay_00559"
+        ],
+        "total_minor": 955570
+      },
+      {
+        "payout_utr": "UTRNOMATCH0001",
+        "expected_method": "SUBSET_SUM",
+        "expected_status": "RESOLVED",
+        "member_count": 3,
+        "members": [
+          "pay_00561",
+          "pay_00562",
+          "pay_00563"
+        ],
+        "total_minor": 1248677
+      },
+      {
+        "payout_utr": "UTRNOMATCH0002",
+        "expected_method": "SUBSET_SUM",
+        "expected_status": "RESOLVED",
+        "member_count": 3,
+        "members": [
+          "pay_00565",
+          "pay_00566",
+          "pay_00567"
+        ],
+        "total_minor": 1129417
+      },
+      {
+        "payout_utr": "UTRNOMATCH0003",
+        "expected_method": "SUBSET_SUM",
+        "expected_status": "RESOLVED",
+        "member_count": 3,
+        "members": [
+          "pay_00569",
+          "pay_00570",
+          "pay_00571"
+        ],
+        "total_minor": 485055
+      },
+      {
+        "payout_utr": "UTRAMBIGUOUS0000",
+        "expected_method": "SUBSET_SUM",
+        "expected_status": "AMBIGUOUS",
+        "member_count": 0,
+        "members": [],
+        "total_minor": 100503,
+        "note": "two distinct sets sum to the credit; the engine must not choose"
+      },
+      {
+        "payout_utr": "UTRAMBIGUOUS0001",
+        "expected_method": "SUBSET_SUM",
+        "expected_status": "AMBIGUOUS",
+        "member_count": 0,
+        "members": [],
+        "total_minor": 73781,
+        "note": "two distinct sets sum to the credit; the engine must not choose"
+      }
+    ]
+  },
   "expected_cases": {
-    "total": 492,
-    "clean": 380,
+    "total": 553,
+    "clean": 441,
     "with_discrepancy": 112,
     "by_category": {
       "DUPLICATE_ENTRY": 5,

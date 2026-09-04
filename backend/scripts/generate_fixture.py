@@ -48,6 +48,7 @@ class Dataset:
     bank: list[dict[str, str]] = field(default_factory=list)
     ledger: list[dict[str, str]] = field(default_factory=list)
     cases: list[Case] = field(default_factory=list)
+    aggregations: list[dict] = field(default_factory=list)
 
 
 def rupees(amount: Decimal) -> str:
@@ -315,6 +316,127 @@ def build() -> Dataset:  # noqa: PLR0915 - a flat script of planted cases reads 
             )
         )
 
+    # --- Phase 4: aggregated payouts (ADR-0019) -----------------------------------------
+    # 10 batches settling under one payout UTR each, 3-6 payments per batch. This is what
+    # aggregation actually looks like: the bank shows one credit carrying the payout UTR,
+    # and every settlement row in the batch carries it too.
+    for batch_no in range(10):
+        size = 3 + (batch_no % 4)
+        day = settle_day()
+        payout_utr = f"UTRPAYOUT{batch_no:04d}"
+        payout_total = Decimal("0.00")
+        members: list[str] = []
+
+        for _ in range(size):
+            i = next_id()
+            order = f"ord_{i:05d}"
+            gross = gross_amount()
+            mdr, gst = contracted_fee(gross)
+            net = gross - mdr - gst
+            payout_total += net
+            members.append(f"pay_{i:05d}")
+
+            data.settlement.append(_settlement_row(i, order, day, gross, mdr, gst, payout_utr))
+            data.ledger.append(_ledger_row(i, order, day, gross, mdr + gst))
+            data.cases.append(Case(order, [], f"member of aggregated payout {payout_utr}"))
+
+        # One bank credit for the whole batch.
+        b = next_id()
+        data.bank.append(_bank_row(b, day, payout_utr, payout_total))
+        data.aggregations.append(
+            {
+                "payout_utr": payout_utr,
+                "expected_method": "SHARED_REFERENCE",
+                "expected_status": "RESOLVED",
+                "member_count": size,
+                "members": sorted(members),
+                "total_minor": int(payout_total * 100),
+            }
+        )
+
+    # 4 payouts where the bank credit carries a reference NO settlement row has, so the
+    # shared-reference pass cannot apply and the subset-sum search is the only route.
+    for batch_no in range(4):
+        size = 3
+        day = settle_day()
+        payout_total = Decimal("0.00")
+        members = []
+
+        for _ in range(size):
+            i = next_id()
+            order = f"ord_{i:05d}"
+            gross = gross_amount()
+            mdr, gst = contracted_fee(gross)
+            net = gross - mdr - gst
+            payout_total += net
+            members.append(f"pay_{i:05d}")
+
+            # Each row carries its own unmatched reference, so nothing pairs 1:1 either.
+            data.settlement.append(
+                _settlement_row(i, order, day, gross, mdr, gst, f"UTRORPHAN{i:07d}")
+            )
+            data.ledger.append(_ledger_row(i, order, day, gross, mdr + gst))
+            data.cases.append(Case(order, [], f"member of unreferenced payout {batch_no}"))
+
+        b = next_id()
+        data.bank.append(_bank_row(b, day, f"UTRNOMATCH{batch_no:04d}", payout_total))
+        data.aggregations.append(
+            {
+                "payout_utr": f"UTRNOMATCH{batch_no:04d}",
+                "expected_method": "SUBSET_SUM",
+                "expected_status": "RESOLVED",
+                "member_count": size,
+                "members": sorted(members),
+                "total_minor": int(payout_total * 100),
+            }
+        )
+
+    # 2 deliberately ambiguous payouts. Amounts are chosen so that two different sets of
+    # settlement rows sum to the credit exactly -- {A} and {B, C} where A = B + C. The
+    # engine must refuse to choose rather than pick one.
+    for batch_no in range(2):
+        day = settle_day()
+        part_b = Decimal(rng.randrange(20_000, 80_000)) / Decimal(100)
+        part_c = Decimal(rng.randrange(20_000, 80_000)) / Decimal(100)
+        whole_a = part_b + part_c
+
+        ambiguous_members = []
+        for net_target in (whole_a, part_b, part_c):
+            i = next_id()
+            order = f"ord_{i:05d}"
+            # Work backwards from the desired NET so the sums line up exactly.
+            gross = (net_target / (Decimal(1) - MDR_RATE * (Decimal(1) + GST_RATE))).quantize(
+                Decimal("0.01")
+            )
+            mdr, gst = contracted_fee(gross)
+            actual_net = gross - mdr - gst
+            adjustment = net_target - actual_net
+            gross += adjustment  # nudge gross so net lands exactly on target
+            mdr, gst = contracted_fee(gross)
+            if gross - mdr - gst != net_target:
+                gross = net_target + mdr + gst  # exact by construction
+
+            ambiguous_members.append(f"pay_{i:05d}")
+            data.settlement.append(
+                _settlement_row(i, order, day, gross, mdr, gst, f"UTRAMBIG{i:07d}")
+            )
+            data.ledger.append(_ledger_row(i, order, day, gross, mdr + gst))
+            data.cases.append(Case(order, [], f"member of ambiguous payout {batch_no}"))
+
+        b = next_id()
+        data.bank.append(_bank_row(b, day, f"UTRAMBIGUOUS{batch_no:04d}", whole_a))
+        data.aggregations.append(
+            {
+                "payout_utr": f"UTRAMBIGUOUS{batch_no:04d}",
+                "expected_method": "SUBSET_SUM",
+                "expected_status": "AMBIGUOUS",
+                "member_count": 0,
+                "members": [],
+                "total_minor": int(whole_a * 100),
+                "note": "two distinct sets sum to the credit; the engine must not choose",
+            }
+        )
+
     # --- 7 malformed rows, to be quarantined rather than ingested ----------------------
     quarantine_expectations: list[dict[str, str]] = []
 
@@ -451,6 +573,26 @@ def write(data: Dataset) -> dict[str, object]:
                 reason: sum(1 for q in quarantine if q["reason"] == reason)
                 for reason in sorted({q["reason"] for q in quarantine})
             },
+        },
+        "expected_aggregations": {
+            "total": len(data.aggregations),
+            "by_expected_status": {
+                status: sum(
+                    1 for a in data.aggregations if a["expected_status"] == status
+                )
+                for status in sorted({a["expected_status"] for a in data.aggregations})
+            },
+            "by_expected_method": {
+                method: sum(
+                    1 for a in data.aggregations if a["expected_method"] == method
+                )
+                for method in sorted({a["expected_method"] for a in data.aggregations})
+            },
+            "resolved_member_total": sum(
+                a["member_count"] for a in data.aggregations
+                if a["expected_status"] == "RESOLVED"
+            ),
+            "groups": data.aggregations,
         },
         "expected_cases": {
             "total": len(data.cases),

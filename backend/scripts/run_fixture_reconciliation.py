@@ -60,6 +60,15 @@ def main() -> None:
             result = reconcile(session)
 
             with engine.connect() as conn:
+                groups = conn.execute(
+                    text(
+                        "SELECT method, status, COUNT(*), SUM(member_count) "
+                        "FROM settlement_groups GROUP BY method, status ORDER BY method, status"
+                    )
+                ).all()
+                grouped_rows = conn.execute(
+                    text("SELECT COUNT(*) FROM transactions WHERE settlement_group_id IS NOT NULL")
+                ).scalar_one()
                 quarantine_by_reason = dict(
                     conn.execute(
                         text(
@@ -79,6 +88,18 @@ def main() -> None:
                 for source, batch in batches.items()
             },
             "quarantine_by_reason": quarantine_by_reason,
+            "aggregation": {
+                "groups": [
+                    {
+                        "method": m,
+                        "status": s,
+                        "count": c,
+                        "member_rows": int(members or 0),
+                    }
+                    for m, s, c, members in groups
+                ],
+                "settlement_rows_in_a_group": grouped_rows,
+            },
             "matching": {
                 "psp_rows": result.psp_rows,
                 "bank_rows": result.bank_rows,
