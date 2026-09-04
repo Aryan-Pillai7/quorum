@@ -1,0 +1,43 @@
+{
+  "dataset": "recon_2026_03",
+  "seed": 20260304,
+  "generated_by": "scripts/generate_fixture.py",
+  "synthetic": true,
+  "caveat": "Synthetic data with discrepancies planted by construction. A match rate measured here shows the engine implements these rules; it is not evidence about real settlement files. See ADR-0015.",
+  "row_counts": {
+    "settlement_csv_rows": 500,
+    "bank_csv_rows": 492,
+    "ledger_csv_rows": 483
+  },
+  "expected_quarantined": {
+    "total": 7,
+    "by_source": {
+      "BANK_STATEMENT": 1,
+      "INTERNAL_LEDGER": 1,
+      "PSP_SETTLEMENT": 5
+    },
+    "by_reason": {
+      "INVALID_AMOUNT": 2,
+      "INVALID_DATE": 1,
+      "MALFORMED_ROW": 1,
+      "MISSING_REQUIRED_FIELD": 2,
+      "UNSUPPORTED_CURRENCY": 1
+    }
+  },
+  "expected_cases": {
+    "total": 492,
+    "clean": 380,
+    "with_discrepancy": 112,
+    "by_category": {
+      "DUPLICATE_ENTRY": 5,
+      "MDR_FEE_VARIANCE": 28,
+      "MISSING_IN_BANK": 12,
+      "MISSING_IN_LEDGER": 10,
+      "MISSING_IN_PSP": 8,
+      "PARTIAL_CAPTURE": 10,
+      "ROUNDING_DIFFERENCE": 8,
+      "ROUTING_SPLIT": 6,
+      "TIMING_DIFFERENCE": 33
+    }
+  }
+}

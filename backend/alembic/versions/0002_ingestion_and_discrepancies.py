@@ -179,6 +179,16 @@ def upgrade() -> None:
     # --- taxonomy: add Phase 2 categories, retire UNCLASSIFIED ----------------------
     _seed_new_categories()
 
+    # Phase 1 described TIMING_DIFFERENCE as requiring the amounts to agree. Phase 2
+    # treats lateness and shortness as independent observations about one payment
+    # (ADR-0012), so the description is corrected to match what the rule actually asserts.
+    op.execute(
+        "UPDATE discrepancy_categories SET description = "
+        "'The bank credit lands in a later settlement window than the processor "
+        "settlement date. Independent of whether the amounts also agree.' "
+        "WHERE code = 'TIMING_DIFFERENCE'"
+    )
+
     # UNCLASSIFIED is replaced by __novel__, which carries the same meaning with a name
     # that cannot be mistaken for a real classification. Safe to delete outright: nothing
     # references it, because Phase 1 shipped no code that assigns categories.
