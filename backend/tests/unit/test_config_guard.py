@@ -21,6 +21,9 @@ def _settings(**overrides) -> Settings:
         "default_auto_apply_threshold": 0.90,
         "default_review_threshold": 0.60,
         "default_min_sample_size": 50,
+        # Pinned so the suite does not read the developer's local .env. A machine
+        # with a real key would otherwise pass the "no key" tests for the wrong reason.
+        "gemini_api_key": None,
     }
     return Settings(**{**base, **overrides})
 
@@ -61,12 +64,12 @@ def test_equal_thresholds_are_rejected_too():
         )
 
 
-def test_production_requires_an_anthropic_key():
-    with pytest.raises(ConfigurationError, match="anthropic_api_key is required"):
-        validate_settings(_settings(environment="production", anthropic_api_key=None))
+def test_production_requires_a_gemini_key():
+    with pytest.raises(ConfigurationError, match="gemini_api_key is required"):
+        validate_settings(_settings(environment="production", gemini_api_key=None))
 
 
-def test_local_does_not_require_an_anthropic_key():
+def test_local_does_not_require_a_gemini_key():
     """Phase 1 has no AI layer; local setup must not demand a key to boot."""
     settings = validate_settings(_settings(environment="local"))
     assert settings.agent_enabled is False
@@ -89,22 +92,22 @@ def test_create_app_calls_the_guard(monkeypatch):
         main.create_app()
 
 
-def test_blank_anthropic_key_reads_as_no_key():
-    """docker-compose forwards an unset ANTHROPIC_API_KEY as "". That is not a key.
+def test_blank_gemini_key_reads_as_no_key():
+    """docker-compose forwards an unset GEMINI_API_KEY as "". That is not a key.
 
     Without this, the service logs agent_enabled=true while having no way to call
-    Claude -- a capability claim it cannot honour.
+    Gemini -- a capability claim it cannot honour.
     """
-    assert _settings(anthropic_api_key="").agent_enabled is False
-    assert _settings(anthropic_api_key="   ").agent_enabled is False
-    assert _settings(anthropic_api_key="").anthropic_api_key is None
+    assert _settings(gemini_api_key="").agent_enabled is False
+    assert _settings(gemini_api_key="   ").agent_enabled is False
+    assert _settings(gemini_api_key="").gemini_api_key is None
 
 
 def test_a_real_key_enables_the_agent_layer():
-    assert _settings(anthropic_api_key="sk-ant-test").agent_enabled is True
+    assert _settings(gemini_api_key="test-key-value").agent_enabled is True
 
 
 def test_blank_key_fails_production_validation():
     """The empty string must not sneak past the production key requirement."""
-    with pytest.raises(ConfigurationError, match="anthropic_api_key is required"):
-        validate_settings(_settings(environment="production", anthropic_api_key=""))
+    with pytest.raises(ConfigurationError, match="gemini_api_key is required"):
+        validate_settings(_settings(environment="production", gemini_api_key=""))
