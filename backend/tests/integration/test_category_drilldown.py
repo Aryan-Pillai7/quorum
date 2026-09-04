@@ -83,10 +83,17 @@ def session() -> Iterator[Session]:
             engine.dispose()
 
 
-@pytest.fixture
-def client(session, monkeypatch) -> Iterator[TestClient]:
-    """An app bound to the scratch database, with the operator token configured."""
+def _client(session, monkeypatch, *, gemini_key: str) -> Iterator[TestClient]:
+    """An app bound to the scratch database, with the environment pinned explicitly.
+
+    Both variables are set rather than inherited. Inheriting is what made these tests
+    non-hermetic: they passed locally only because a developer .env supplied a real
+    GEMINI_API_KEY, and failed in CI, which deliberately runs without one. Setting
+    GEMINI_API_KEY to "" is not the same as deleting it -- a delete would let the .env
+    value leak back in, while an empty string overrides it and normalizes to None.
+    """
     monkeypatch.setenv("OPERATOR_TOKEN", TOKEN)
+    monkeypatch.setenv("GEMINI_API_KEY", gemini_key)
     get_settings.cache_clear()
     from app.main import create_app
 
@@ -95,6 +102,23 @@ def client(session, monkeypatch) -> Iterator[TestClient]:
     yield TestClient(app, raise_server_exceptions=False)
     app.dependency_overrides.clear()
     get_settings.cache_clear()
+
+
+@pytest.fixture
+def client(session, monkeypatch) -> Iterator[TestClient]:
+    """The default: the agent layer is available, so a stubbed client is actually used.
+
+    The key is a dummy. Every test using this fixture replaces GeminiClient, so no real
+    call is ever made -- the key exists only to get past the availability check that
+    guards the batch loop.
+    """
+    yield from _client(session, monkeypatch, gemini_key="test-gemini-key")
+
+
+@pytest.fixture
+def client_without_agent(session, monkeypatch) -> Iterator[TestClient]:
+    """No API key configured, which is how CI runs and how a demo box might."""
+    yield from _client(session, monkeypatch, gemini_key="")
 
 
 def make_findings(session: Session, count: int, prefix: str = "a") -> list[Discrepancy]:
@@ -317,18 +341,26 @@ def test_generation_only_touches_the_requested_category(client, session, monkeyp
     assert untouched["counts"]["explained"] == 0
 
 
-def test_generation_without_an_api_key_says_so_rather_than_failing(client, session):
-    """CI runs with no key, and so might a demo machine."""
+def test_generation_without_an_api_key_says_so_rather_than_failing(
+    client_without_agent, session
+):
+    """CI runs with no key, and so might a demo machine.
+
+    No longer skips when a key happens to be present in the environment: the fixture
+    pins the absence, so this always runs and always means something.
+    """
     make_findings(session, 2)
-    body = client.post(
+    body = client_without_agent.post(
         f"/v1/categories/{CATEGORY}/explain",
         headers={"Authorization": f"Bearer {TOKEN}"},
     ).json()
 
-    if body["agent_available"]:
-        pytest.skip("a real API key is configured; the no-key path is not exercised here")
+    assert body["agent_available"] is False
     assert body["explained"] == 0
     assert "GEMINI_API_KEY is not set" in body["agent_status"]
+    # Auth still passed and the endpoint still answered: an absent key disables the agent
+    # layer, it does not reject the request.
+    assert body["category_code"] == CATEGORY
 
 
 def test_generation_lands_in_the_hash_chain(client, session, monkeypatch):
