@@ -34,9 +34,18 @@ class Settings(BaseSettings):
     redis_socket_timeout_seconds: float = 0.5
     trust_cache_ttl_seconds: int = 300
 
-    # Claude. Unused until Phase 3; absent means the agent layer is disabled, not broken.
-    anthropic_api_key: str | None = None
-    anthropic_model: str = "claude-sonnet-5"
+    # Gemini (ADR-0016). Absent means the agent layer is disabled and says so, rather
+    # than silently degrading to no explanations with no indication why.
+    gemini_api_key: str | None = None
+    gemini_model: str = "gemini-3.5-flash"
+    gemini_timeout_seconds: float = 30.0
+    # Transient 5xx from the API was observed in roughly a third of calls during Phase 3
+    # testing, so retry is a requirement here, not a precaution.
+    gemini_max_retries: int = 3
+    # Pause between category batches. The free tier is per-minute, and nine batches fired
+    # back to back reliably trips it; pacing avoids the retry path rather than relying on
+    # it. Set to 0.0 to disable when running against a paid quota.
+    gemini_inter_batch_seconds: float = 1.5
 
     # Fallback trust-gate thresholds, used only for a category with no trust_scores row.
     # Live thresholds are per-row in Postgres so they can be tuned per category.
@@ -44,14 +53,14 @@ class Settings(BaseSettings):
     default_review_threshold: float = Field(default=0.60, ge=0.0, le=1.0)
     default_min_sample_size: int = Field(default=50, ge=1)
 
-    @field_validator("anthropic_api_key", mode="before")
+    @field_validator("gemini_api_key", mode="before")
     @classmethod
     def _blank_key_is_no_key(cls, value: str | None) -> str | None:
         """Treat an empty or whitespace-only key as absent.
 
-        docker-compose passes ANTHROPIC_API_KEY through as "" when the host has not set
+        docker-compose passes GEMINI_API_KEY through as "" when the host has not set
         it. Without this, the empty string reads as a configured key and the service
-        reports agent_enabled=true while having no way to call Claude -- a capability
+        reports agent_enabled=true while having no way to call Gemini -- a capability
         claim it cannot honour.
         """
         if isinstance(value, str) and not value.strip():
@@ -60,7 +69,7 @@ class Settings(BaseSettings):
 
     @property
     def agent_enabled(self) -> bool:
-        return bool(self.anthropic_api_key)
+        return bool(self.gemini_api_key)
 
 
 def validate_settings(settings: Settings) -> Settings:
@@ -94,7 +103,7 @@ def validate_settings(settings: Settings) -> Settings:
         )
 
     if settings.environment == "production" and not settings.agent_enabled:
-        problems.append("anthropic_api_key is required when environment=production")
+        problems.append("gemini_api_key is required when environment=production")
 
     if problems:
         raise ConfigurationError(

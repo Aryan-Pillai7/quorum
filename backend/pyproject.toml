@@ -17,8 +17,9 @@ dependencies = [
     "pydantic>=2.9",
     "pydantic-settings>=2.6",
     "redis>=5.2",
-    # Phase 3. Declared now so the container image is built once, not rebuilt mid-demo.
-    "anthropic>=0.40",
+    # Phase 3 agent layer (ADR-0016). google-genai, not google-generativeai: the latter
+    # is end-of-life and prints a deprecation notice on import.
+    "google-genai>=1.0",
 ]
 
 [project.optional-dependencies]
