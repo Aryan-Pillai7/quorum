@@ -3,223 +3,371 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Quorum — Reconciliation Dashboard</title>
+<title>Quorum — Reconciliation</title>
+
+<!-- Two families. Both degrade to something genuinely good if the network blocks them:
+     Georgia is on every machine, and the system sans stack is near-identical to Inter. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap" rel="stylesheet">
+
 <style>
   :root {
-    --bg: #0e1116; --panel: #161b22; --line: #262d38;
-    --text: #e6edf3; --muted: #8b949e; --dim: #6e7681;
-    --ok: #3fb950; --warn: #d29922; --bad: #f85149; --accent: #58a6ff;
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; background: var(--bg); color: var(--text);
-    font: 14px/1.5 ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif;
-  }
-  header {
-    padding: 20px 28px; border-bottom: 1px solid var(--line);
-    display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap;
-  }
-  h1 { font-size: 19px; margin: 0; letter-spacing: -0.2px; }
-  .sub { color: var(--muted); font-size: 13px; }
-  .wrap { padding: 22px 28px 60px; max-width: 1280px; }
-  .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; }
-  .panel {
-    background: var(--panel); border: 1px solid var(--line);
-    border-radius: 10px; padding: 16px 18px;
-  }
-  .panel h2 {
-    font-size: 11px; text-transform: uppercase; letter-spacing: 0.9px;
-    color: var(--muted); margin: 0 0 12px; font-weight: 600;
-  }
-  .stat { font-size: 27px; font-weight: 650; letter-spacing: -0.5px; }
-  .stat.warn { color: var(--warn); }
-  .stat-note { color: var(--dim); font-size: 12px; margin-top: 6px; }
-  .mt { margin-top: 18px; }
-  table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  th {
-    text-align: left; font-weight: 600; color: var(--muted); font-size: 11px;
-    text-transform: uppercase; letter-spacing: 0.6px;
-    padding: 7px 10px; border-bottom: 1px solid var(--line);
-  }
-  td { padding: 9px 10px; border-bottom: 1px solid #1d232c; vertical-align: middle; }
-  tr:last-child td { border-bottom: none; }
-  .num { text-align: right; font-variant-numeric: tabular-nums; }
-  .bar-track {
-    background: #21262d; border-radius: 3px; height: 7px; width: 100%;
-    overflow: hidden; min-width: 90px;
-  }
-  .bar-fill { height: 100%; background: var(--accent); border-radius: 3px; }
-  .pill {
-    display: inline-block; padding: 2px 8px; border-radius: 999px;
-    font-size: 11px; font-weight: 600; letter-spacing: 0.2px; white-space: nowrap;
-  }
-  .pill.review { background: rgba(210,153,34,0.16); color: var(--warn); }
-  .pill.auto   { background: rgba(63,185,80,0.16);  color: var(--ok); }
-  .pill.block  { background: rgba(248,81,73,0.16);  color: var(--bad); }
-  .sev { font-size: 11px; color: var(--dim); }
-  .why { color: var(--dim); font-size: 12px; }
-  .caveat {
-    background: rgba(210,153,34,0.07); border: 1px solid rgba(210,153,34,0.28);
-    border-radius: 8px; padding: 12px 15px; color: #d9c07a; font-size: 12.5px;
-  }
-  .caveat b { color: var(--warn); }
-  .caveat ul { margin: 7px 0 0; padding-left: 18px; }
-  .case { border-left: 3px solid var(--accent); padding-left: 14px; margin-bottom: 20px; }
-  .case:last-child { margin-bottom: 0; }
-  .case h3 { font-size: 13px; margin: 0 0 3px; }
-  .case .meta { color: var(--dim); font-size: 12px; margin-bottom: 9px; }
-  .case p { margin: 7px 0; }
-  .label {
-    color: var(--muted); font-size: 11px; text-transform: uppercase;
-    letter-spacing: 0.6px; font-weight: 600;
-  }
-  .rules { color: var(--muted); font-size: 12.5px; font-family: ui-monospace, monospace; }
-  button {
-    background: var(--accent); color: #04121f; border: 0; border-radius: 7px;
-    padding: 8px 15px; font-weight: 650; font-size: 13px; cursor: pointer;
-  }
-  button:disabled { opacity: 0.5; cursor: default; }
-  .err { color: var(--bad); }
-  code { font-family: ui-monospace, monospace; font-size: 12px; color: var(--muted); }
+    /* Six structural tokens. Everything that is not a state signal uses only these. */
+    --paper:      #F7F8F9;
+    --surface:    #FFFFFF;
+    --ink:        #12161C;
+    --ink-muted:  #5C6673;
+    --rule:       #E3E6EA;
+    --accent:     #17456B;
 
-  tr.cat { cursor: pointer; }
-  tr.cat:hover td { background: #1b212a; }
-  tr.cat.open td { background: #1b212a; }
-  .chev { display: inline-block; width: 12px; color: var(--dim); transition: transform .12s; }
+    /* The only other colour on the page, and only inside a status pill. */
+    --auto-ink:   #2F6B4F;  --auto-fill:   #E9F1EC;
+    --review-ink: #7A5A18;  --review-fill: #F7F0DE;
+    --block-ink:  #94382F;  --block-fill:  #FAEAE7;
+
+    --serif: "Source Serif 4", Georgia, "Times New Roman", serif;
+    --sans: Inter, -apple-system, "Segoe UI", system-ui, sans-serif;
+    /* A real monospace where one exists. Never Courier, and never for amounts. */
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+
+    /* Elevation is rationed. Only two things on this page are allowed to lift. */
+    --lift: 0 1px 2px rgba(18, 22, 28, 0.04), 0 4px 12px rgba(18, 22, 28, 0.06);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font: 400 15px/1.55 var(--sans);
+    -webkit-font-smoothing: antialiased;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Numbers align by font feature, not by switching to a monospace typeface. */
+  .n { font-variant-numeric: tabular-nums; }
+
+  a { color: var(--accent); }
+
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 3px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; animation: none !important; }
+  }
+
+  /* ---------- masthead ---------- */
+
+  .masthead { border-bottom: 1px solid var(--rule); background: var(--surface); }
+  .masthead-inner {
+    max-width: 1180px; margin: 0 auto; padding: 26px 32px 22px;
+    display: flex; align-items: flex-end; gap: 18px; flex-wrap: wrap;
+  }
+  .wordmark { font: 600 27px/1 var(--serif); letter-spacing: -0.015em; margin: 0; }
+  .tagline { color: var(--ink-muted); font-size: 14px; padding-bottom: 2px; }
+  .updated { margin-left: auto; color: var(--ink-muted); font-size: 13px; }
+
+  main { max-width: 1180px; margin: 0 auto; padding: 28px 32px 72px; }
+
+  /* ---------- reading note ---------- */
+  /* Context, not an alarm, so it gets no warning colour. */
+  .note {
+    border-left: 2px solid var(--accent);
+    padding: 2px 0 2px 16px;
+    margin: 0 0 30px;
+    color: var(--ink-muted);
+    font-size: 13.5px;
+    max-width: 78ch;
+  }
+  .note strong { color: var(--ink); font-weight: 500; }
+  .note ul { margin: 8px 0 0; padding-left: 17px; }
+  .note li { margin-bottom: 4px; }
+
+  /* ---------- summary band: one wide, three small ---------- */
+
+  .summary {
+    display: grid;
+    grid-template-columns: 1.55fr 1fr 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 40px;
+  }
+  @media (max-width: 1000px) { .summary { grid-template-columns: 1fr 1fr; } }
+  @media (max-width: 620px)  { .summary { grid-template-columns: 1fr; } }
+
+  .tile {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    padding: 20px 22px;
+    display: flex; flex-direction: column;
+  }
+
+  /* The one moment of real weight on the page. Everything else stays quiet around it. */
+  .tile.headline {
+    box-shadow: var(--lift);
+    border-color: #DADEE3;
+    padding: 26px 28px;
+  }
+
+  .tile-label { font-size: 13px; font-weight: 500; color: var(--ink-muted); margin-bottom: 14px; }
+  .tile-value {
+    font: 400 34px/1.05 var(--serif);
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+  }
+  .tile.headline .tile-value { font-size: 52px; }
+  .tile-caption { margin-top: 12px; color: var(--ink-muted); font-size: 13px; line-height: 1.5; }
+  .tile.headline .tile-caption { font-size: 13.5px; max-width: 42ch; }
+  .tile-caption .em { color: var(--ink); font-weight: 500; }
+
+  /* ---------- sections ---------- */
+
+  .section-head { display: flex; align-items: baseline; gap: 14px; margin: 0 0 4px; }
+  .section-head h2 { font: 600 20px/1.3 var(--serif); letter-spacing: -0.01em; margin: 0; }
+  .section-sub { color: var(--ink-muted); font-size: 13.5px; margin: 0 0 16px; max-width: 74ch; }
+
+  /* ---------- ledger table ---------- */
+  /* Deliberately not a card. It sits on paper, separated by hairlines. */
+
+  table { width: 100%; border-collapse: collapse; }
+
+  thead th {
+    text-align: left;
+    font-size: 12.5px; font-weight: 500; color: var(--ink-muted);
+    padding: 0 14px 10px;
+    border-bottom: 1px solid var(--rule);
+    white-space: nowrap;
+  }
+  th.n, td.n { text-align: right; }
+
+  tbody td { padding: 14px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+
+  tr.cat { cursor: pointer; transition: background 90ms ease; }
+  tr.cat:hover > td { background: #FCFCFD; }
+  tr.cat.open > td { background: #FAFBFC; }
+  tr.cat:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+  .chev {
+    display: inline-block; width: 10px; color: var(--ink-muted);
+    transition: transform 110ms ease; font-size: 9px;
+  }
   tr.cat.open .chev { transform: rotate(90deg); color: var(--accent); }
-  td.drill { padding: 0 10px 16px; background: #12171e; }
+
+  .cat-name { font-weight: 500; }
+  .cat-sev { color: var(--ink-muted); font-size: 12.5px; margin-top: 2px; }
+
+  /* Discrete evidence ticker: counted observations, not percent-complete. */
+  .ticker { display: flex; gap: 2px; margin-bottom: 6px; }
+  .ticker i { display: block; width: 9px; height: 14px; border-radius: 1.5px; background: #E8EBEE; }
+  .ticker i.on { background: var(--accent); }
+  .ticker i.on.decayed { background: #9FAEBB; }
+
+  .score { font-size: 14px; }
+  .score-was {
+    color: var(--ink-muted); text-decoration: line-through;
+    margin-left: 6px; font-size: 12.5px;
+  }
+
+  .evidence-count { font-size: 14px; }
+  .evidence-need { color: var(--ink-muted); font-size: 12.5px; margin-top: 2px; }
+
+  .when { font-size: 13.5px; }
+  .when.stale { color: var(--review-ink); }
+  .when.never { color: var(--ink-muted); }
+
+  /* Soft-filled status pill with a dot. Reads as a reviewed system, not log output. */
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 3px 10px 3px 8px; border-radius: 999px;
+    font-size: 12.5px; font-weight: 500; white-space: nowrap;
+  }
+  .pill::before {
+    content: ""; width: 5px; height: 5px; border-radius: 50%;
+    background: currentColor; flex: none;
+  }
+  .pill.auto   { color: var(--auto-ink);   background: var(--auto-fill); }
+  .pill.review { color: var(--review-ink); background: var(--review-fill); }
+  .pill.block  { color: var(--block-ink);  background: var(--block-fill); }
+
+  .gate-why { color: var(--ink-muted); font-size: 12.5px; margin-top: 5px; max-width: 26ch; }
+
+  /* ---------- drill-down ---------- */
+  /* The second and last thing allowed to lift. */
+
+  td.drill { padding: 0 14px 20px; background: #FAFBFC; }
 
   .drill-head {
-    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
-    padding: 12px 4px 10px; color: var(--muted); font-size: 12.5px;
+    display: flex; align-items: center; gap: 20px; flex-wrap: wrap;
+    padding: 16px 2px 14px; color: var(--ink-muted); font-size: 13px;
   }
   .drill-head .spacer { margin-left: auto; }
 
   .finding {
-    border: 1px solid var(--line); border-radius: 8px;
-    margin-bottom: 10px; background: var(--panel);
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    margin-bottom: 8px;
   }
+  .finding[open] { box-shadow: var(--lift); }
   .finding > summary {
-    list-style: none; cursor: pointer; padding: 11px 14px;
-    display: grid; grid-template-columns: 150px 1fr auto; gap: 12px; align-items: center;
+    list-style: none; cursor: pointer; padding: 13px 16px;
+    display: grid; grid-template-columns: 168px 1fr auto; gap: 16px; align-items: center;
   }
   .finding > summary::-webkit-details-marker { display: none; }
-  .finding > summary:hover { background: #1b212a; }
-  .ref { font-family: ui-monospace, monospace; font-size: 12.5px; color: var(--text); }
-  .rule { font-size: 11px; color: var(--dim); font-family: ui-monospace, monospace; }
+  .finding > summary:hover { background: #FCFCFD; }
+  .finding > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  @media (max-width: 720px) {
+    .finding > summary { grid-template-columns: 1fr; gap: 8px; }
+  }
 
-  .ev {
-    display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--muted);
-  }
-  .ev b { color: var(--text); font-variant-numeric: tabular-nums; font-weight: 600; }
+  .ref { font: 500 13px/1.4 var(--mono); }
+  .rule-id { font: 400 12px/1.4 var(--mono); color: var(--ink-muted); margin-top: 2px; }
 
-  .reveal {
-    font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 999px;
-    white-space: nowrap; border: 1px solid transparent;
-  }
-  .reveal.ready { background: rgba(88,166,255,0.14); color: var(--accent); }
-  .reveal.absent { background: transparent; color: var(--dim); border-color: var(--line); }
+  .ev { display: flex; gap: 20px; flex-wrap: wrap; font-size: 13px; color: var(--ink-muted); }
+  .ev b { color: var(--ink); font-weight: 500; }
 
-  .body { padding: 0 14px 14px; }
-  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-  @media (max-width: 820px) { .cols { grid-template-columns: 1fr; } }
-  .col { border: 1px solid var(--line); border-radius: 7px; padding: 11px 13px; }
-  .col h4 {
-    margin: 0 0 8px; font-size: 10.5px; text-transform: uppercase;
-    letter-spacing: 0.8px; color: var(--muted); font-weight: 600;
+  .reveal { font-size: 12.5px; font-weight: 500; white-space: nowrap; }
+  .reveal.ready { color: var(--accent); }
+  .reveal.absent { color: var(--ink-muted); }
+
+  .body { padding: 0 16px 16px; }
+  .cols {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 1px;
+    background: var(--rule); border: 1px solid var(--rule);
+    border-radius: 7px; overflow: hidden;
   }
-  .col.math { border-left: 2px solid var(--ok); }
-  .col.ai { border-left: 2px solid var(--accent); }
-  .col p { margin: 0 0 8px; font-size: 13px; }
-  .kv { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; font-size: 12.5px; }
-  .kv .k { color: var(--muted); }
-  .kv .v { font-variant-numeric: tabular-nums; text-align: right; }
-  .compared {
-    font-family: ui-monospace, monospace; font-size: 11.5px; color: var(--dim);
-    margin-bottom: 9px; word-break: break-all;
+  @media (max-width: 860px) { .cols { grid-template-columns: 1fr; } }
+  .col { background: var(--surface); padding: 15px 17px; }
+  .col h4 { margin: 0 0 10px; font: 600 13.5px/1.3 var(--serif); color: var(--ink); }
+  .col p { margin: 0 0 10px; font-size: 13.5px; }
+  .col p:last-child { margin-bottom: 0; }
+
+  .compared { font: 400 12px/1.5 var(--mono); color: var(--ink-muted); margin-bottom: 11px; }
+  .kv { display: grid; grid-template-columns: 1fr auto; gap: 6px 20px; font-size: 13.5px; }
+  .kv .k { color: var(--ink-muted); }
+  .kv .v { text-align: right; }
+
+  .attribution { color: var(--ink-muted); font-size: 12.5px; margin-top: 12px; line-height: 1.6; }
+  .missing { color: var(--ink-muted); font-size: 13.5px; }
+
+  .sub-label {
+    display: block; font-size: 12.5px; font-weight: 500;
+    color: var(--ink-muted); margin-bottom: 3px;
   }
-  .missing { color: var(--dim); font-size: 13px; }
-  .genbar { display: flex; align-items: center; gap: 10px; margin-top: 4px; }
+
+  /* The only button that spends money. It should look like a decision. */
   button.gen {
-    background: transparent; color: var(--warn); border: 1px solid var(--warn);
-    border-radius: 7px; padding: 6px 12px; font-weight: 600; font-size: 12px;
+    background: var(--surface); color: var(--ink); border: 1px solid #CFD5DB;
+    border-radius: 6px; padding: 7px 13px; font: 500 13px var(--sans); cursor: pointer;
+    transition: border-color 90ms ease;
   }
-  button.gen:disabled { opacity: .5; }
-  .genhint { color: var(--dim); font-size: 11.5px; }
+  button.gen:hover:not(:disabled) { border-color: var(--accent); }
+  button.gen:disabled { opacity: 0.55; cursor: default; }
+  .genhint { color: var(--ink-muted); font-size: 12.5px; }
+  .genbar { display: inline-flex; align-items: center; gap: 11px; flex-wrap: wrap; }
 
-  .stale { color: var(--warn); font-size: 11px; white-space: nowrap; }
-  .fresh { color: var(--dim); font-size: 11px; white-space: nowrap; }
-  .decayed { color: var(--warn); }
-  .wasscore { color: var(--dim); text-decoration: line-through; font-size: 11px; }
+  /* ---------- worked example ---------- */
+
+  .case { border-left: 2px solid var(--rule); padding-left: 20px; margin-bottom: 26px; max-width: 82ch; }
+  .case:last-child { margin-bottom: 0; }
+  .case h3 { font: 600 16px/1.35 var(--serif); margin: 0 0 3px; }
+  .case .meta { color: var(--ink-muted); font-size: 12.5px; margin-bottom: 12px; }
+  .case .meta .ref-inline { font-family: var(--mono); font-size: 12px; }
+  .case p { margin: 0 0 12px; font-size: 14px; }
+  .case .held { color: var(--ink-muted); font-size: 13px; }
+
+  .err { color: var(--block-ink); }
+  .loading { color: var(--ink-muted); font-size: 13.5px; padding: 16px 14px; }
 </style>
 </head>
 <body>
-<header>
-  <h1>Quorum</h1>
-  <span class="sub">Three-way payment reconciliation · deterministic engine + advisory AI</span>
-  <span class="sub" id="status" style="margin-left:auto"></span>
+
+<header class="masthead">
+  <div class="masthead-inner">
+    <h1 class="wordmark">Quorum</h1>
+    <span class="tagline">Three-way payment reconciliation</span>
+    <span class="updated" id="status"></span>
+  </div>
 </header>
 
-<div class="wrap">
-  <div class="caveat" id="caveats">Loading…</div>
+<main>
+  <div class="note" id="caveats">Loading</div>
 
-  <div class="row mt">
-    <div class="panel">
-      <h2>Reconciled cleanly</h2>
-      <div class="stat" id="clean">—</div>
-      <div class="stat-note" id="clean-note"></div>
+  <section class="summary">
+    <div class="tile headline">
+      <div class="tile-label">Applied without a human</div>
+      <div class="tile-value" id="auto">—</div>
+      <div class="tile-caption" id="auto-note"></div>
     </div>
-    <div class="panel">
-      <h2>₹ awaiting human review</h2>
-      <div class="stat warn" id="at-risk">—</div>
-      <div class="stat-note" id="at-risk-note"></div>
+    <div class="tile">
+      <div class="tile-label">Reconciled cleanly</div>
+      <div class="tile-value" id="clean">—</div>
+      <div class="tile-caption" id="clean-note"></div>
     </div>
-    <div class="panel">
-      <h2>Findings explained</h2>
-      <div class="stat" id="explained">—</div>
-      <div class="stat-note" id="explained-note"></div>
+    <div class="tile">
+      <div class="tile-label">Awaiting review</div>
+      <div class="tile-value" id="at-risk">—</div>
+      <div class="tile-caption" id="at-risk-note"></div>
     </div>
-    <div class="panel">
-      <h2>Auto-applied by AI</h2>
-      <div class="stat" id="auto">—</div>
-      <div class="stat-note" id="auto-note"></div>
+    <div class="tile">
+      <div class="tile-label">Findings explained</div>
+      <div class="tile-value" id="explained">—</div>
+      <div class="tile-caption" id="explained-note"></div>
     </div>
-  </div>
+  </section>
 
-  <div class="panel mt">
-    <h2>Trust score by discrepancy category — what the system will and will not automate</h2>
+  <section>
+    <div class="section-head"><h2>Trust by category</h2></div>
+    <p class="section-sub">
+      What the system will and will not automate, and the audited evidence behind each
+      decision. Select a row to see its individual findings.
+    </p>
     <table>
       <thead>
         <tr>
           <th>Category</th>
-          <th class="num">Findings</th>
-          <th class="num">₹ at risk</th>
-          <th>Trust score</th>
-          <th class="num">Evidence</th>
+          <th class="n">Findings</th>
+          <th class="n">At risk</th>
+          <th>Trust</th>
+          <th class="n">Evidence</th>
           <th>Last audit</th>
           <th>Gate</th>
-          <th>Why</th>
         </tr>
       </thead>
-      <tbody id="cats"><tr><td colspan="7">Loading…</td></tr></tbody>
+      <tbody id="cats"><tr><td colspan="7" class="loading">Loading</td></tr></tbody>
     </table>
-  </div>
+  </section>
 
-  <div class="panel mt">
-    <h2>Worked example — one transaction, end to end</h2>
-    <div id="cases">Loading…</div>
-  </div>
-</div>
+  <section style="margin-top:44px">
+    <div class="section-head"><h2>Worked example</h2></div>
+    <p class="section-sub">
+      One transaction end to end: what the rules found, what the agent said about it, and
+      why it was held back.
+    </p>
+    <div id="cases" class="loading">Loading</div>
+  </section>
+</main>
 
 <script>
 const money = (minor) =>
-  "₹" + (minor / 100).toLocaleString("en-IN", { maximumFractionDigits: 0 });
+  "₹" + (minor / 100).toLocaleString("en-IN", {
+    minimumFractionDigits: 2, maximumFractionDigits: 2,
+  });
 const esc = (s) =>
   String(s ?? "").replace(/[&<>"]/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
 const pillClass = (g) =>
   g === "AUTO_APPLY" ? "auto" : g === "BLOCK" ? "block" : "review";
+const pillLabel = (g) =>
+  g === "AUTO_APPLY" ? "Auto-apply" : g === "BLOCK" ? "Blocked" : "Human review";
+const titleCase = (s) =>
+  String(s ?? "").charAt(0) + String(s ?? "").slice(1).toLowerCase();
 
 async function load() {
   const status = document.getElementById("status");
@@ -229,37 +377,44 @@ async function load() {
       fetch("/v1/narrated").then((r) => r.json()),
     ]);
     render(dash, narrated.examples || []);
-    status.textContent = "updated " + new Date().toLocaleTimeString();
+    status.textContent = "Updated " + new Date().toLocaleTimeString();
   } catch (e) {
-    status.innerHTML = '<span class="err">failed to load: ' + esc(e.message) + "</span>";
+    status.innerHTML = '<span class="err">Could not load: ' + esc(e.message) + "</span>";
   }
 }
 
 function render(d, cases) {
   const t = d.totals, r = d.at_risk;
 
-  document.getElementById("clean").textContent =
-    t.full_matches + " / " + t.match_records;
-  document.getElementById("clean-note").textContent =
-    t.transactions.toLocaleString("en-IN") +
-    " source rows matched into " + t.match_records + " records";
+  document.getElementById("clean").textContent = t.full_matches.toLocaleString("en-IN");
+  document.getElementById("clean-note").innerHTML =
+    `of <span class="em">${t.match_records.toLocaleString("en-IN")}</span> match records, ` +
+    `built from ${t.transactions.toLocaleString("en-IN")} source rows`;
 
   document.getElementById("at-risk").textContent = money(r.awaiting_human_review_minor);
-  document.getElementById("at-risk-note").textContent =
-    r.findings_awaiting_review + " findings routed to a human. " + r.definition;
+  document.getElementById("at-risk-note").innerHTML =
+    `across <span class="em">${r.findings_awaiting_review}</span> findings routed to a person`;
 
   document.getElementById("explained").textContent =
-    t.explained_findings + " / " + t.discrepancy_findings;
-  document.getElementById("explained-note").textContent =
-    "explained by the agent layer; the rest carry their deterministic finding only";
+    t.explained_findings.toLocaleString("en-IN");
+  document.getElementById("explained-note").innerHTML =
+    `of <span class="em">${t.discrepancy_findings}</span> findings; the rest carry their ` +
+    `deterministic result only`;
 
-  // Deliberately shows zero. That is the honest number, and it is the point.
+  // The headline. Its caption is derived from the data rather than written in, because a
+  // fixed sentence here silently became false the moment a category earned automation.
+  const automating = d.categories.filter((c) => c.gate_decision === "AUTO_APPLY");
   document.getElementById("auto").textContent = money(r.auto_eligible_minor);
-  document.getElementById("auto-note").textContent =
-    "nothing has earned automation yet — every category is at zero observations";
+  document.getElementById("auto-note").innerHTML =
+    automating.length === 0
+      ? "No category has earned automation. Every score is still a cold-start seed, and " +
+        "the gate refuses automation without evidence."
+      : `<span class="em">${automating.map((c) => esc(c.display_name)).join(", ")}</span> ` +
+        `${automating.length === 1 ? "has" : "have"} earned automation. The gate decides ` +
+        `eligibility, not execution — nothing is applied without a person.`;
 
   document.getElementById("caveats").innerHTML =
-    "<b>Read this with the numbers.</b><ul>" +
+    "<strong>Read these with the numbers.</strong><ul>" +
     d.caveats.map((c) => "<li>" + esc(c) + "</li>").join("") + "</ul>";
 
   // The common case on a 15s poll is that nothing changed. Rebuilding the table anyway
@@ -272,23 +427,26 @@ function render(d, cases) {
     renderCategories(d);
   }
 
-  document.getElementById("cases").innerHTML = cases.length
+  const casesEl = document.getElementById("cases");
+  casesEl.classList.remove("loading");
+  casesEl.innerHTML = cases.length
     ? cases.map((c) => `
       <div class="case">
         <h3>${esc(c.match_key)} — ${esc(c.category_code)}</h3>
         <div class="meta">
-          rule <code>${esc(c.rule_id)}</code> ·
-          delta ${money(c.delta_minor)} ·
-          model ${esc(c.model)} (confidence: ${esc(c.model_confidence)}, advisory only)
+          <span class="ref-inline">${esc(c.rule_id)}</span>
+          &nbsp;&nbsp;&nbsp;delta ${money(c.delta_minor)}
+          &nbsp;&nbsp;&nbsp;${esc(c.model)}, self-reported confidence
+          ${esc(c.model_confidence)}, advisory only
         </div>
-        <p><span class="label">AI explanation</span><br>${esc(c.agent_explanation)}</p>
-        <p><span class="label">Suggested action</span><br>${esc(c.agent_corrective_action)}</p>
+        <p><span class="sub-label">Agent explanation</span>${esc(c.agent_explanation)}</p>
+        <p><span class="sub-label">Suggested action</span>${esc(c.agent_corrective_action)}</p>
         <p>
-          <span class="pill ${pillClass(c.gate_decision)}">${esc(c.gate_decision)}</span>
-          <span class="why"> ${esc(c.why_held_back_plain)}</span>
+          <span class="pill ${pillClass(c.gate_decision)}">${pillLabel(c.gate_decision)}</span>
+          &nbsp; <span class="held">${esc(c.why_held_back_plain)}</span>
         </p>
       </div>`).join("")
-    : "<p class='why'>No explained findings yet. Run <code>POST /v1/reconcile</code>.</p>";
+    : '<p class="missing">No explained findings yet. Run a reconciliation to populate this.</p>';
 }
 
 // --- category drill-down -------------------------------------------------------------
@@ -305,6 +463,21 @@ const drillCache = {};
 const openCategories = new Set();
 const expandedFindings = new Set();
 
+const TICKS = 10;
+
+function ticker(sampleSize, minSample, isDecaying) {
+  // Counted evidence, not percent-complete: ten segments against min_sample_size, so an
+  // untouched category reads as "nothing observed" rather than "0% done".
+  const filled = minSample > 0
+    ? Math.min(TICKS, Math.round((sampleSize / minSample) * TICKS))
+    : 0;
+  let out = '<div class="ticker" aria-hidden="true">';
+  for (let i = 0; i < TICKS; i++) {
+    out += `<i class="${i < filled ? (isDecaying ? "on decayed" : "on") : ""}"></i>`;
+  }
+  return out + "</div>";
+}
+
 async function toggleCategory(code) {
   const row = document.querySelector(`tr.cat[data-code="${CSS.escape(code)}"]`);
   const panel = document.querySelector(`tr.drillrow[data-for="${CSS.escape(code)}"]`);
@@ -313,6 +486,7 @@ async function toggleCategory(code) {
   const opening = panel.hidden;
   panel.hidden = !opening;
   row.classList.toggle("open", opening);
+  row.setAttribute("aria-expanded", String(opening));
   if (opening) openCategories.add(code);
   else openCategories.delete(code);
   if (!opening) return;
@@ -324,7 +498,7 @@ async function toggleCategory(code) {
     return;
   }
 
-  cell.innerHTML = '<div class="drill-head">Loading findings…</div>';
+  cell.innerHTML = '<div class="drill-head">Loading findings</div>';
   try {
     const data = await fetch(`/v1/categories/${encodeURIComponent(code)}/findings`)
       .then((r) => r.json());
@@ -332,7 +506,7 @@ async function toggleCategory(code) {
     cell.innerHTML = renderDrill(data);
     wireDrill(code, cell);
   } catch (e) {
-    cell.innerHTML = `<div class="drill-head err">could not load: ${esc(e.message)}</div>`;
+    cell.innerHTML = `<div class="drill-head err">Could not load: ${esc(e.message)}</div>`;
   }
 }
 
@@ -345,49 +519,66 @@ function restoreOpenCategories() {
     if (!row || !panel || !drillCache[code]) return;
     panel.hidden = false;
     row.classList.add("open");
+    row.setAttribute("aria-expanded", "true");
     const cell = panel.querySelector("td.drill");
     cell.innerHTML = renderDrill(drillCache[code]);
     wireDrill(code, cell);
   });
 }
 
-
 function renderCategories(d) {
-  document.getElementById("cats").innerHTML = d.categories.map((c) => {
-    const pct = Math.round((c.sample_size / c.min_sample_size) * 100);
-    return `<tr class="cat" data-code="${esc(c.code)}">
-      <td><span class="chev">&#9656;</span> <span>${esc(c.display_name)}</span>
-          <div class="sev">${esc(c.severity)}</div></td>
-      <td class="num">${c.open_findings}</td>
-      <td class="num">${money(c.at_risk_minor)}</td>
+  document.getElementById("cats").innerHTML = d.categories.map((c) => `
+    <tr class="cat" data-code="${esc(c.code)}" tabindex="0" role="button" aria-expanded="false">
       <td>
-        <div class="bar-track"><div class="bar-fill" style="width:${(c.score * 100).toFixed(0)}%"></div></div>
-        <div class="sev ${c.is_decaying ? "decayed" : ""}">${c.score.toFixed(2)}${
-          c.is_decaying ? ` <span class="wasscore">${c.base_score.toFixed(2)}</span>` : ""
+        <div><span class="chev">&#9654;</span> <span class="cat-name">${esc(c.display_name)}</span></div>
+        <div class="cat-sev">${esc(titleCase(c.severity))}</div>
+      </td>
+      <td class="n">${c.open_findings}</td>
+      <td class="n">${money(c.at_risk_minor)}</td>
+      <td>
+        ${ticker(c.sample_size, c.min_sample_size, c.is_decaying)}
+        <div class="score">${c.score.toFixed(2)}${
+          c.is_decaying ? `<span class="score-was">${c.base_score.toFixed(2)}</span>` : ""
         }</div>
       </td>
-      <td class="num">${c.sample_size} / ${c.min_sample_size}<div class="sev">${pct}%</div></td>
+      <td class="n">
+        <div class="evidence-count">${c.sample_size} / ${c.min_sample_size}</div>
+        <div class="evidence-need">${
+          c.observations_needed > 0 ? c.observations_needed + " more needed" : "met"
+        }</div>
+      </td>
       <td>${
-        c.days_since_audit === null
-          ? '<span class="fresh">never</span>'
+        c.days_since_audit == null
+          ? '<span class="when never">Never audited</span>'
           : c.is_decaying
-            ? `<span class="stale">${c.days_since_audit.toFixed(0)}d &middot; decaying</span>`
-            : `<span class="fresh">${c.days_since_audit.toFixed(0)}d ago</span>`
+            ? `<span class="when stale">${c.days_since_audit.toFixed(0)} days ago, decaying</span>`
+            : `<span class="when">${
+                c.days_since_audit < 1 ? "Today" : c.days_since_audit.toFixed(0) + " days ago"
+              }</span>`
       }</td>
-      <td><span class="pill ${pillClass(c.gate_decision)}">${esc(c.gate_decision)}</span></td>
-      <td class="why">${
-        c.auto_resolvable
-          ? "needs " + c.observations_needed + " more observations"
-          : "never automated — policy ceiling"
-      }</td>
+      <td>
+        <span class="pill ${pillClass(c.gate_decision)}">${pillLabel(c.gate_decision)}</span>
+        <div class="gate-why">${
+          c.auto_resolvable
+            ? (c.observations_needed > 0
+                ? "Needs " + c.observations_needed + " more observations"
+                : "Eligible on current evidence")
+            : "Never automated, by policy"
+        }</div>
+      </td>
     </tr>
     <tr class="drillrow" data-for="${esc(c.code)}" hidden>
-      <td class="drill" colspan="8"></td>
-    </tr>`;
-  }).join("");
+      <td class="drill" colspan="7"></td>
+    </tr>`).join("");
 
   document.querySelectorAll("tr.cat").forEach((row) => {
     row.addEventListener("click", () => toggleCategory(row.dataset.code));
+    row.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        toggleCategory(row.dataset.code);
+      }
+    });
   });
 
   restoreOpenCategories();
@@ -400,13 +591,12 @@ function renderDrill(d) {
       ? `<button class="gen" data-code="${esc(d.category.code)}">
            Generate ${c.unexplained} missing explanation${c.unexplained === 1 ? "" : "s"}
          </button>
-         <span class="genhint">one batched API call for the whole category</span>`
-      : `<span class="genhint">all ${c.explained} findings already explained — no API call needed</span>`;
+         <span class="genhint">one batched call for the whole category</span>`
+      : `<span class="genhint">All ${c.explained} findings already explained, nothing to generate</span>`;
 
   return `
     <div class="drill-head">
       <span>${c.returned} of ${c.total_findings} findings</span>
-      <span>·</span>
       <span>${c.explained} explained, ${c.unexplained} not yet</span>
       <span class="spacer"></span>
       <span class="genbar">${gen}</span>
@@ -415,7 +605,6 @@ function renderDrill(d) {
 }
 
 function renderFinding(f) {
-  const money = (v) => "₹" + (v / 100).toLocaleString("en-IN", { minimumFractionDigits: 2 });
   const top = f.evidence_rows
     .slice(0, 3)
     .map((r) => `${esc(r.label)} <b>${r.is_money ? money(r.value) : esc(r.value)}</b>`)
@@ -435,16 +624,15 @@ function renderFinding(f) {
 
   const ai = f.has_explanation
     ? `<p>${esc(f.explanation)}</p>
-       <div class="label">Suggested action</div>
-       <p>${esc(f.corrective_action)}</p>
-       <div class="sev">
-         ${esc(f.explained_by_model || "")} · self-reported confidence
-         ${esc(f.model_confidence || "n/a")} · advisory only ·
-         gate ${esc(f.gate_decision || "—")}
+       <p><span class="sub-label">Suggested action</span>${esc(f.corrective_action)}</p>
+       <div class="attribution">
+         ${esc(f.explained_by_model || "")}, self-reported confidence
+         ${esc(f.model_confidence || "n/a")}, advisory only. Gate:
+         ${esc(f.gate_decision || "—")}
        </div>`
     : `<p class="missing">
-         No explanation stored for this finding. The deterministic result on the left
-         stands on its own — it was computed by field comparison, not by a model.
+         No explanation stored for this finding. The deterministic result beside it stands
+         on its own — it was computed by field comparison, not by a model.
        </p>`;
 
   const open = expandedFindings.has(f.discrepancy_id) ? " open" : "";
@@ -453,20 +641,20 @@ function renderFinding(f) {
       <summary>
         <div>
           <div class="ref">${esc(f.match_key)}</div>
-          <div class="rule">${esc(f.rule_id)}</div>
+          <div class="rule-id">${esc(f.rule_id)}</div>
         </div>
         <div class="ev">${top}</div>
         ${badge}
       </summary>
       <div class="body">
         <div class="cols">
-          <div class="col math">
+          <div class="col">
             <h4>What the rules computed</h4>
             <div class="compared">${esc(f.compared || "field comparison")}</div>
             <div class="kv">${kv}</div>
           </div>
-          <div class="col ai">
-            <h4>What the AI said about it</h4>
+          <div class="col">
+            <h4>What the agent said about it</h4>
             ${ai}
           </div>
         </div>
@@ -490,7 +678,7 @@ function wireDrill(code, cell) {
     if (!token) return;
 
     button.disabled = true;
-    button.textContent = "Generating…";
+    button.textContent = "Generating";
     try {
       const res = await fetch(`/v1/categories/${encodeURIComponent(code)}/explain`, {
         method: "POST",
