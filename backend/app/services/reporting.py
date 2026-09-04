@@ -174,18 +174,56 @@ def dashboard_summary(session: Session, *, settings: Settings | None = None) -> 
             }
             for v in sorted(views, key=lambda v: v.open_findings, reverse=True)
         ],
-        "caveats": [
-            (
-                "Every trust score is 0.0 at sample_size 0. No agent proposal has been "
-                "confirmed or overridden by a human yet, so nothing has been scored. "
-                "These are cold-start seeds, not measured accuracy."
-            ),
-            (
-                "Because of that, no category can reach AUTO_APPLY: the gate refuses "
-                "automation below min_sample_size regardless of score."
-            ),
-        ],
+        # Computed, not hardcoded. This text was a fixed string until a category actually
+        # earned evidence and it silently became false -- exactly the kind of stale claim
+        # the honesty rules exist to prevent.
+        "caveats": _caveats(views),
     }
+
+
+def _caveats(views: list[CategoryTrustView]) -> list[str]:
+    """Say what is actually true of the scores on screen right now."""
+    with_evidence = [v for v in views if v.sample_size > 0]
+    cold = [v for v in views if v.sample_size == 0]
+    automating = [v for v in views if v.gate_decision == "AUTO_APPLY"]
+
+    caveats: list[str] = []
+
+    if not with_evidence:
+        caveats.append(
+            "Every trust score is 0.0 at sample_size 0. No agent proposal has been "
+            "confirmed or overridden by a human yet, so nothing has been scored. These "
+            "are cold-start seeds, not measured accuracy."
+        )
+        caveats.append(
+            "Because of that, no category can reach AUTO_APPLY: the gate refuses "
+            "automation below min_sample_size regardless of score."
+        )
+        return caveats
+
+    earned = ", ".join(f"{v.code} ({v.sample_size})" for v in with_evidence)
+    caveats.append(
+        f"{len(with_evidence)} of {len(views)} categories have audited evidence behind "
+        f"their score: {earned}. Those numbers come from approvals a second person "
+        f"verified, not from agreement counts."
+    )
+    if cold:
+        caveats.append(
+            f"The remaining {len(cold)} are still cold-start seeds at sample_size 0. "
+            f"Their 0.00 means no evidence, not poor accuracy."
+        )
+    if automating:
+        caveats.append(
+            f"{len(automating)} category has reached AUTO_APPLY: "
+            f"{', '.join(v.code for v in automating)}. Individual transactions in it are "
+            f"still routed to a human when the amount clears the high-value threshold."
+        )
+    else:
+        caveats.append(
+            "No category has reached AUTO_APPLY: the gate refuses automation below "
+            "min_sample_size regardless of score."
+        )
+    return caveats
 
 
 def latest_explanations(session: Session, discrepancy_ids: list[str]) -> dict[str, dict]:
