@@ -81,6 +81,71 @@
   button:disabled { opacity: 0.5; cursor: default; }
   .err { color: var(--bad); }
   code { font-family: ui-monospace, monospace; font-size: 12px; color: var(--muted); }
+
+  tr.cat { cursor: pointer; }
+  tr.cat:hover td { background: #1b212a; }
+  tr.cat.open td { background: #1b212a; }
+  .chev { display: inline-block; width: 12px; color: var(--dim); transition: transform .12s; }
+  tr.cat.open .chev { transform: rotate(90deg); color: var(--accent); }
+  td.drill { padding: 0 10px 16px; background: #12171e; }
+
+  .drill-head {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    padding: 12px 4px 10px; color: var(--muted); font-size: 12.5px;
+  }
+  .drill-head .spacer { margin-left: auto; }
+
+  .finding {
+    border: 1px solid var(--line); border-radius: 8px;
+    margin-bottom: 10px; background: var(--panel);
+  }
+  .finding > summary {
+    list-style: none; cursor: pointer; padding: 11px 14px;
+    display: grid; grid-template-columns: 150px 1fr auto; gap: 12px; align-items: center;
+  }
+  .finding > summary::-webkit-details-marker { display: none; }
+  .finding > summary:hover { background: #1b212a; }
+  .ref { font-family: ui-monospace, monospace; font-size: 12.5px; color: var(--text); }
+  .rule { font-size: 11px; color: var(--dim); font-family: ui-monospace, monospace; }
+
+  .ev {
+    display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--muted);
+  }
+  .ev b { color: var(--text); font-variant-numeric: tabular-nums; font-weight: 600; }
+
+  .reveal {
+    font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 999px;
+    white-space: nowrap; border: 1px solid transparent;
+  }
+  .reveal.ready { background: rgba(88,166,255,0.14); color: var(--accent); }
+  .reveal.absent { background: transparent; color: var(--dim); border-color: var(--line); }
+
+  .body { padding: 0 14px 14px; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 820px) { .cols { grid-template-columns: 1fr; } }
+  .col { border: 1px solid var(--line); border-radius: 7px; padding: 11px 13px; }
+  .col h4 {
+    margin: 0 0 8px; font-size: 10.5px; text-transform: uppercase;
+    letter-spacing: 0.8px; color: var(--muted); font-weight: 600;
+  }
+  .col.math { border-left: 2px solid var(--ok); }
+  .col.ai { border-left: 2px solid var(--accent); }
+  .col p { margin: 0 0 8px; font-size: 13px; }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; font-size: 12.5px; }
+  .kv .k { color: var(--muted); }
+  .kv .v { font-variant-numeric: tabular-nums; text-align: right; }
+  .compared {
+    font-family: ui-monospace, monospace; font-size: 11.5px; color: var(--dim);
+    margin-bottom: 9px; word-break: break-all;
+  }
+  .missing { color: var(--dim); font-size: 13px; }
+  .genbar { display: flex; align-items: center; gap: 10px; margin-top: 4px; }
+  button.gen {
+    background: transparent; color: var(--warn); border: 1px solid var(--warn);
+    border-radius: 7px; padding: 6px 12px; font-weight: 600; font-size: 12px;
+  }
+  button.gen:disabled { opacity: .5; }
+  .genhint { color: var(--dim); font-size: 11.5px; }
 </style>
 </head>
 <body>
@@ -193,8 +258,9 @@ function render(d, cases) {
 
   document.getElementById("cats").innerHTML = d.categories.map((c) => {
     const pct = Math.round((c.sample_size / c.min_sample_size) * 100);
-    return `<tr>
-      <td><div>${esc(c.display_name)}</div><div class="sev">${esc(c.severity)}</div></td>
+    return `<tr class="cat" data-code="${esc(c.code)}">
+      <td><span class="chev">&#9656;</span> <span>${esc(c.display_name)}</span>
+          <div class="sev">${esc(c.severity)}</div></td>
       <td class="num">${c.open_findings}</td>
       <td class="num">${money(c.at_risk_minor)}</td>
       <td>
@@ -208,8 +274,15 @@ function render(d, cases) {
           ? "needs " + c.observations_needed + " more observations"
           : "never automated — policy ceiling"
       }</td>
+    </tr>
+    <tr class="drillrow" data-for="${esc(c.code)}" hidden>
+      <td class="drill" colspan="7"></td>
     </tr>`;
   }).join("");
+
+  document.querySelectorAll("tr.cat").forEach((row) => {
+    row.addEventListener("click", () => toggleCategory(row.dataset.code));
+  });
 
   document.getElementById("cases").innerHTML = cases.length
     ? cases.map((c) => `
@@ -228,6 +301,153 @@ function render(d, cases) {
         </p>
       </div>`).join("")
     : "<p class='why'>No explained findings yet. Run <code>POST /v1/reconcile</code>.</p>";
+}
+
+// --- category drill-down -------------------------------------------------------------
+// Explanations arrive inline with the findings, so revealing one is a DOM toggle with no
+// network call. Generating a missing one is a POST that spends API quota. The two are
+// styled differently on purpose: one is instant, the other does work.
+
+const drillCache = {};
+
+async function toggleCategory(code) {
+  const row = document.querySelector(`tr.cat[data-code="${CSS.escape(code)}"]`);
+  const panel = document.querySelector(`tr.drillrow[data-for="${CSS.escape(code)}"]`);
+  if (!row || !panel) return;
+
+  const opening = panel.hidden;
+  panel.hidden = !opening;
+  row.classList.toggle("open", opening);
+  if (!opening) return;
+
+  const cell = panel.querySelector("td.drill");
+  if (drillCache[code]) {
+    cell.innerHTML = renderDrill(drillCache[code]);
+    wireDrill(code, cell);
+    return;
+  }
+
+  cell.innerHTML = '<div class="drill-head">Loading findings…</div>';
+  try {
+    const data = await fetch(`/v1/categories/${encodeURIComponent(code)}/findings`)
+      .then((r) => r.json());
+    drillCache[code] = data;
+    cell.innerHTML = renderDrill(data);
+    wireDrill(code, cell);
+  } catch (e) {
+    cell.innerHTML = `<div class="drill-head err">could not load: ${esc(e.message)}</div>`;
+  }
+}
+
+function renderDrill(d) {
+  const c = d.counts;
+  const gen =
+    c.unexplained > 0
+      ? `<button class="gen" data-code="${esc(d.category.code)}">
+           Generate ${c.unexplained} missing explanation${c.unexplained === 1 ? "" : "s"}
+         </button>
+         <span class="genhint">one batched API call for the whole category</span>`
+      : `<span class="genhint">all ${c.explained} findings already explained — no API call needed</span>`;
+
+  return `
+    <div class="drill-head">
+      <span>${c.returned} of ${c.total_findings} findings</span>
+      <span>·</span>
+      <span>${c.explained} explained, ${c.unexplained} not yet</span>
+      <span class="spacer"></span>
+      <span class="genbar">${gen}</span>
+    </div>
+    ${d.findings.map(renderFinding).join("")}`;
+}
+
+function renderFinding(f) {
+  const money = (v) => "₹" + (v / 100).toLocaleString("en-IN", { minimumFractionDigits: 2 });
+  const top = f.evidence_rows
+    .slice(0, 3)
+    .map((r) => `${esc(r.label)} <b>${r.is_money ? money(r.value) : esc(r.value)}</b>`)
+    .join("");
+
+  const badge = f.has_explanation
+    ? '<span class="reveal ready">Show explanation</span>'
+    : '<span class="reveal absent">Not yet explained</span>';
+
+  const kv = f.evidence_rows
+    .map(
+      (r) =>
+        `<div class="k">${esc(r.label)}</div>
+         <div class="v">${r.is_money ? money(r.value) : esc(r.value)}</div>`
+    )
+    .join("");
+
+  const ai = f.has_explanation
+    ? `<p>${esc(f.explanation)}</p>
+       <div class="label">Suggested action</div>
+       <p>${esc(f.corrective_action)}</p>
+       <div class="sev">
+         ${esc(f.explained_by_model || "")} · self-reported confidence
+         ${esc(f.model_confidence || "n/a")} · advisory only ·
+         gate ${esc(f.gate_decision || "—")}
+       </div>`
+    : `<p class="missing">
+         No explanation stored for this finding. The deterministic result on the left
+         stands on its own — it was computed by field comparison, not by a model.
+       </p>`;
+
+  return `
+    <details class="finding">
+      <summary>
+        <div>
+          <div class="ref">${esc(f.match_key)}</div>
+          <div class="rule">${esc(f.rule_id)}</div>
+        </div>
+        <div class="ev">${top}</div>
+        ${badge}
+      </summary>
+      <div class="body">
+        <div class="cols">
+          <div class="col math">
+            <h4>What the rules computed</h4>
+            <div class="compared">${esc(f.compared || "field comparison")}</div>
+            <div class="kv">${kv}</div>
+          </div>
+          <div class="col ai">
+            <h4>What the AI said about it</h4>
+            ${ai}
+          </div>
+        </div>
+      </div>
+    </details>`;
+}
+
+function wireDrill(code, cell) {
+  const button = cell.querySelector("button.gen");
+  if (!button) return;
+  button.addEventListener("click", async (event) => {
+    event.stopPropagation();
+    const token = window.prompt("Operator token (this action spends API quota):");
+    if (!token) return;
+
+    button.disabled = true;
+    button.textContent = "Generating…";
+    try {
+      const res = await fetch(`/v1/categories/${encodeURIComponent(code)}/explain`, {
+        method: "POST",
+        headers: { Authorization: "Bearer " + token },
+      });
+      const body = await res.json();
+      if (!res.ok) {
+        button.textContent = "Failed: " + esc(body.error?.message || res.status);
+        return;
+      }
+      delete drillCache[code];
+      const panel = document.querySelector(`tr.drillrow[data-for="${CSS.escape(code)}"]`);
+      panel.hidden = true;
+      await toggleCategory(code);
+    } catch (e) {
+      button.disabled = false;
+      button.textContent = "Failed: " + esc(e.message);
+    }
+  });
 }
 
 load();
