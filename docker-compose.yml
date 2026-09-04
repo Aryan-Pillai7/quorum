@@ -46,6 +46,8 @@ services:
       REDIS_URL: redis://cache:6379/0
       # Optional: the agent layer stays disabled without it, and says so at boot.
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      # Unset leaves the approval endpoints disabled (503), not open.
+      OPERATOR_TOKEN: ${OPERATOR_TOKEN:-}
     ports:
       - "8000:8000"
     depends_on:

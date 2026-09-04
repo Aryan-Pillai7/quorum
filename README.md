@@ -20,7 +20,7 @@ Two of three agreeing is a lead. Three agreeing is a reconciliation.
 
 ---
 
-## Status: Phase 5 (hardening) complete
+## Status: Phase 6 (approval loop) complete
 
 - ✅ Postgres schema with migrations and a seeded 17-category discrepancy taxonomy
 - ✅ Trust-gate policy logic, with tests
@@ -32,7 +32,8 @@ Two of three agreeing is a lead. Three agreeing is a reconciliation.
 - ✅ `POST /v1/reconcile` and a dashboard rendering real data
 - ✅ Aggregated payouts — N settlement rows explaining one bank credit
 - ✅ Hash-chained audit trail, safe cache invalidation, CI
-- ⬜ Trust scores learning from real outcomes at scale
+- ✅ Approval loop — audited human feedback moves trust scores
+- ⬜ Maintenance-mode override, drift detection, backlog decay
 
 **Every trust score in the database is still a cold-start seed at `sample_size = 0`.** No
 human has confirmed or overridden an agent proposal yet, so nothing has been scored. The
@@ -84,6 +85,90 @@ and a guess.
 ---
 
 ---
+
+---
+
+---
+
+## Phase 6 results — the approval loop, closed
+
+Until now the system explained and gated but nothing could act, and no trust score had ever
+moved. This closes that loop.
+
+### A category earning automation, end to end
+
+```bash
+export OPERATOR_TOKEN=demo-secret
+AUDIT_BASELINE_RATE=1.0 python scripts/demo_trust_movement.py TIMING_DIFFERENCE
+```
+
+```
+BEFORE   TIMING_DIFFERENCE          AFTER    TIMING_DIFFERENCE
+  gate         : HUMAN_REVIEW         gate         : AUTO_APPLY
+  score        : 0.0000               score        : 0.9988
+  observations : 0 of 30              observations : 30 of 30
+```
+
+The gate flips at observation **30** — and the 30th approval's stored selection reason
+records why it was guaranteed an audit: *"auditing this approval could move
+TIMING_DIFFERENCE out of HUMAN_REVIEW"*. Every figure is read back from Postgres, not from
+an API response.
+
+**30 is not a lowered demo threshold.** It is `TIMING_DIFFERENCE`'s seeded
+`min_sample_size` for a LOW-severity category, unchanged since Phase 1. The gate opens
+where it would open in production.
+
+### Approving is not evidence — auditing is
+
+Two separate acts, by two people (ADR-0025):
+
+| | Moves trust? |
+|---|---|
+| **Approve** a drafted correction — clears the finding operationally | ❌ no |
+| **Audit** that approval — a second person confirms it was right | ✅ yes |
+
+Counting approvals directly would measure how often reviewers click accept, which tracks
+queue pressure at least as well as correctness — a score built that way rises fastest
+exactly when reviewers are most overloaded.
+
+What gets audited is not left to chance where it matters: **any approval that could change
+what a category is allowed to do is audited at 100%**, decided by simulating the gate both
+ways. The rest are sampled, drawn from a hash of the approval id so a caller cannot retry
+until it escapes the sample.
+
+### The fail-safe that outranks earned trust
+
+`TIMING_DIFFERENCE` is now at `AUTO_APPLY`. A transaction in it above **₹2,000** still
+returns `HUMAN_REVIEW` (ADR-0027).
+
+Trust is measured per *category* — how often the system is right about a kind of problem.
+It says nothing about what one mistake would cost. A category at 0.9999 over ten thousand
+observations is still wrong once in ten thousand, and that one should not be a large payout
+closing itself.
+
+### What was adjusted for the demo, and what was not
+
+The **audit baseline rate** is raised to 1.0 for the walkthrough. At the default 20% the
+loop still works — the first run moved the score 0 → 0.5904 on four sampled audits — but
+reaching 30 audited observations needs roughly 150 approvals against 33 available findings.
+Auditing everything is strictly *more* evidence per approval: the sample exists to save
+human effort, not to add rigour.
+
+### Auth is demo-grade, and that is not a euphemism
+
+One shared bearer token on the two write endpoints (ADR-0028). Reads stay open.
+
+**No users, no roles, no expiry, no revocation, no per-approver identity** — `approver_id`
+is self-asserted in the request body and the token does not verify it. Anyone with the
+token can claim to be anyone. It fails closed: with no token configured the endpoints
+return 503, never 200.
+
+### Still open, deliberately
+
+Maintenance-mode override, drift-spike detection, and feedback-backlog decay are **not
+built**. A category that degrades will be caught by the EMA within a handful of audited
+observations, but nothing detects a sudden spike faster than that, and nothing decays trust
+when feedback simply stops arriving.
 
 ---
 
