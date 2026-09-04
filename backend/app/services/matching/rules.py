@@ -76,6 +76,12 @@ class MatchContext:
     sibling_psp_ids: tuple[str, ...] = ()
     sibling_sum_minor: int | None = None
 
+    # True when this settlement row was aggregated into a bank credit alongside others
+    # (ADR-0019). The bank leg belongs to the group's own match record, so this row has
+    # `bank=None` -- but the money plainly arrived, and reporting MISSING_IN_BANK would
+    # be false. Same shape of correction as `order_group_ledger` below.
+    settlement_group_present: bool = False
+
     # The ledger entry for this order, whether or not it is attached to *this* record.
     # A transaction may belong to at most one match (ADR-0005), so in a routing split the
     # ledger leg attaches to one processor row and the siblings have `ledger=None` -- but
@@ -139,6 +145,11 @@ Rule = Callable[[MatchContext], Finding | None]
 def r01_missing_in_bank(ctx: MatchContext) -> Finding | None:
     """Processor and ledger agree a payment settled, but no money reached the bank."""
     if ctx.bank is not None or ctx.psp is None or ctx.ledger is None:
+        return None
+    # The credit exists but is shared with the rest of an aggregated payout, so it hangs
+    # off the group's record rather than this one. Absent from this record is not absent
+    # from the bank.
+    if ctx.settlement_group_present:
         return None
     return Finding(
         rule_id="R01_missing_in_bank",
