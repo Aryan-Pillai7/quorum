@@ -11,11 +11,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, make_url, text
 from sqlalchemy.orm import sessionmaker
 
+from alembic import command
 from app.config import get_settings
 from app.models import SourceSystem
 from app.services.ingestion import ingest_csv

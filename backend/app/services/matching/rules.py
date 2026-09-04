@@ -206,7 +206,10 @@ def r03_missing_in_psp(ctx: MatchContext) -> Finding | None:
             "psp_leg": None,
             "note": "no shared reference field exists between bank and ledger",
         },
-        explains_delta=True,
+        # Explains the missing leg, not missing money: this finding accounts for zero
+        # rupees. Claiming otherwise would suppress a genuine amount gap sitting
+        # alongside it.
+        explains_delta=False,
     )
 
 
