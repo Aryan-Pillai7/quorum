@@ -1,8 +1,13 @@
-"""AuditEvent -- append-only record of everything that changed state.
+"""AuditEvent -- append-only, hash-chained record of everything that changed state.
 
-Append-only by convention in Phase 1, not enforced by a database trigger, and there is
-no hash chain. This is an audit *trail*, not a *tamper-evident* one -- see ADR-0008.
-The README says the same thing rather than implying a guarantee the schema lacks.
+Phase 5 (ADR-0022) adds the hash chain ADR-0008 deferred. Each row carries the hash of
+its own content plus the previous row's hash, so a retroactive edit, a deletion, or an
+insertion anywhere in the chain breaks every hash after it.
+
+Precise about what that buys, because the word "tamper-evident" invites overclaiming:
+it DETECTS alteration of stored rows. It does not PREVENT it, and someone with write
+access to the database can recompute the whole chain forward from a tampered row. There
+is no signing key and no external anchor. See ADR-0022 and the README.
 """
 
 from __future__ import annotations
@@ -11,7 +16,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import DateTime, Enum, Index, String, func
+from sqlalchemy import BigInteger, DateTime, Enum, Identity, Index, String, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -30,6 +35,19 @@ class AuditEvent(Base):
 
     id: Mapped[uuid.UUID] = uuid_pk()
 
+    # The chain needs a total order, and timestamps are not one: two events can share a
+    # microsecond. This monotonic sequence is what "previous entry" means.
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(), nullable=False, unique=True)
+
+    # Hash of this row's content plus prev_hash. Nullable because rows written before
+    # Phase 5 have no hash, and back-filling one retroactively would prove nothing about
+    # them -- anyone with write access could do the same. Verification reports them as
+    # predating the chain rather than pretending they are covered.
+    prev_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    entry_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
+
+    # Set application-side, not by the server default: the timestamp is part of the
+    # hashed content, so it has to be known before the row is written.
     occurred_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -59,6 +77,7 @@ class AuditEvent(Base):
         Index("ix_audit_events_entity_type_entity_id", "entity_type", "entity_id"),
         Index("ix_audit_events_occurred_at", "occurred_at"),
         Index("ix_audit_events_actor_type", "actor_type"),
+        Index("ix_audit_events_seq", "seq"),
     )
 
     def __repr__(self) -> str:
