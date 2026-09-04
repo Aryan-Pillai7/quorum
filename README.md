@@ -20,7 +20,7 @@ Two of three agreeing is a lead. Three agreeing is a reconciliation.
 
 ---
 
-## Status: Phase 4 (aggregated payouts) complete
+## Status: Phase 5 (hardening) complete
 
 - ✅ Postgres schema with migrations and a seeded 17-category discrepancy taxonomy
 - ✅ Trust-gate policy logic, with tests
@@ -31,7 +31,8 @@ Two of three agreeing is a lead. Three agreeing is a reconciliation.
 - ✅ Gemini explanation layer, gated and advisory-only
 - ✅ `POST /v1/reconcile` and a dashboard rendering real data
 - ✅ Aggregated payouts — N settlement rows explaining one bank credit
-- ⬜ Trust scores learning from real outcomes
+- ✅ Hash-chained audit trail, safe cache invalidation, CI
+- ⬜ Trust scores learning from real outcomes at scale
 
 **Every trust score in the database is still a cold-start seed at `sample_size = 0`.** No
 human has confirmed or overridden an agent proposal yet, so nothing has been scored. The
@@ -81,6 +82,64 @@ and a guess.
 ---
 
 ---
+
+---
+
+---
+
+## Phase 5 results — hardening
+
+No new matching behaviour. Three safety gaps earlier ADRs left open, closed.
+
+### Tamper-evident audit trail (ADR-0022, extends ADR-0008)
+
+Every audit entry now stores `sha256(its own content || the previous entry's hash)`.
+
+```bash
+python scripts/verify_audit_chain.py    # exits 1 if the chain is broken
+```
+
+| Tampering | Detected | How |
+|---|---|---|
+| A stored row is edited | ✅ | its hash no longer matches its content |
+| A row is deleted from the middle | ✅ | the linkage breaks — each surviving row is still internally valid |
+| A row is inserted or reordered | ✅ | same linkage break |
+| The whole chain is recomputed after an edit | ❌ | **passes verification** — see below |
+
+That last row is the honest one, and there is a test that performs the attack and asserts
+it succeeds. The chain detects *silent* alteration. It does not stop an operator with
+write access. Closing that properly needs entries signed with a key the database server
+does not hold, or digests anchored somewhere the operator does not control — both real
+options, neither in scope here.
+
+### Trust cache: gating never reads it (ADR-0023, corrects ADR-0009)
+
+ADR-0009 argued a failed invalidation was safe because reads fall back to Postgres. That
+covers Redis being **down**. Writing the failure tests surfaced the case it does not
+cover: a `DELETE` that fails while `GET` keeps working. That is not a miss, so nothing
+falls back — the cache serves the stale permissive score, fast and confident.
+
+So the guarantee is now structural rather than argued: **gating reads Postgres directly
+and never touches the cache.** The cached read exists only for display. An import-graph
+test fails the build if any gating module reaches for the cache.
+
+The load-bearing test makes invalidation fail while reads still work, poisons the
+surviving key with a mature 0.99 score over 5,000 observations, confirms the cached read
+really is poisoned, and asserts the gate still returns `HUMAN_REVIEW` from the one real
+observation in Postgres.
+
+Updates write Postgres and commit **before** deleting the key. Inverting that lets a
+concurrent read repopulate the key from the pre-update row.
+
+### CI (ADR-0024, supersedes ADR-0010)
+
+One workflow: ruff, unit tests, integration tests against Postgres and Redis containers,
+and a check that the fixture regenerates byte-identically. That last step immediately
+earned its place — `csv.writer` defaults to CRLF, so the fixture's bytes had been
+depending on which OS generated it. ADR-0015's reproducibility claim was accidentally
+true on one machine; now it is pinned to LF and actually true.
+
+**Totals: 220 unit tests, 59 integration tests, ruff clean.**
 
 ---
 
@@ -442,13 +501,19 @@ These are known and deliberate, not oversights.
 
 - **No measured accuracy.** Nothing has been reconciled yet. Any number in this repo is
   a seed value or a threshold, not a result.
-- **The audit log is an audit trail, not a tamper-evident one.** `audit_events` is
-  append-only by convention and code review. There is no hash chain and no database
-  trigger preventing `UPDATE` or `DELETE`. Do not read it as cryptographic provenance.
+- **The audit log is tamper-*evident*, not tamper-*proof*.** Every entry is hash-chained
+  to its predecessor, so an edit, a deletion, or an insertion is **detected** by
+  `python scripts/verify_audit_chain.py`. It is **not prevented**: anyone with database
+  write access can alter a row and recompute every hash after it, and verification will
+  then pass. A test performs exactly that attack and asserts it succeeds, so this limit
+  is demonstrated rather than merely disclaimed. There is no signing key and no external
+  anchor. Rows written before Phase 5 have no hashes and are reported as predating the
+  chain rather than counted as verified.
 - **Migrations run on container start.** Convenient for a buildathon, wrong for a real
   deployment, where they belong in a separate step.
-- **No CI.** Tests run locally, by convention. Nothing mechanically blocks a push with
-  failing tests.
+- **CI runs lint plus the full suite on every push**, against real Postgres and Redis
+  service containers, with no API key set — so the suite must pass with the agent layer
+  disabled. It does not deploy anything, and it does not run the Gemini path.
 - **No authentication.** Every endpoint is open. This is a local-only build.
 - **Re-ingesting a file is refused, not merged.** Identical content is rejected on hash;
   a *corrected* file has to go into a fresh batch. There is no amend-in-place path.
