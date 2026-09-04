@@ -20,22 +20,99 @@ Two of three agreeing is a lead. Three agreeing is a reconciliation.
 
 ---
 
-## Status: Phase 1 (foundation) complete
+## Status: Phase 2 (deterministic engine) complete
 
-This repository currently contains the schema, the trust-gating logic, and the service
-scaffold. **The matching engine and the AI layer are not built yet.** What runs today:
-
-- ✅ Postgres schema with migrations and a seeded 14-category discrepancy taxonomy
+- ✅ Postgres schema with migrations and a seeded 17-category discrepancy taxonomy
 - ✅ Trust-gate policy logic, with tests
 - ✅ FastAPI service with health, readiness, and a trust-taxonomy read endpoint
 - ✅ Docker Compose stack that comes up clean from a fresh clone
-- ⬜ CSV ingestion and the deterministic matching engine (Phase 2)
+- ✅ CSV ingestion with per-row quarantine and batch tracking
+- ✅ Deterministic three-way matching engine with multi-label classification
 - ⬜ Claude-backed explanation and classification (Phase 3)
 - ⬜ Trust scores learning from real outcomes (Phase 4)
 
-**There are no accuracy or match-rate numbers in this README, because none have been
-measured.** Every trust score in the database is a cold-start seed at `sample_size = 0`.
-The API says so on every response rather than presenting zeros as scores.
+**Every trust score in the database is still a cold-start seed at `sample_size = 0`.** No
+agent has proposed anything yet, so nothing has been scored. The API says so on every
+response rather than presenting zeros as scores.
+
+---
+
+## Phase 2 results
+
+Dataset: **`recon_2026_03`**, checked in at `backend/tests/fixtures/recon_2026_03/`.
+Measured 2026-09-04 by `scripts/run_fixture_reconciliation.py`, reproducible with
+`pytest -m integration`.
+
+**Read this first: the dataset is synthetic.** It is produced by a seeded generator
+(`scripts/generate_fixture.py`) with discrepancies planted by construction. That is what
+makes the expected outcomes exactly known — and it is also why these numbers measure
+*whether the engine implements its rules*, not whether those rules describe real
+settlement files. Real data contains shapes nobody planted. Treat this as a regression
+baseline, not as production accuracy. See ADR-0015.
+
+### Ingestion
+
+| Source | CSV rows | Ingested | Quarantined |
+|---|---:|---:|---:|
+| Processor settlement | 500 | 495 | 5 |
+| Bank statement | 492 | 491 | 1 |
+| Internal ledger | 483 | 482 | 1 |
+
+All 7 quarantined rows were deliberately malformed, and each was caught with the specific
+reason planted: 2 `INVALID_AMOUNT` (one of them `100.005` INR, refused rather than rounded
+to paise), 2 `MISSING_REQUIRED_FIELD`, 1 `INVALID_DATE` (`31-02-2026`), 1
+`UNSUPPORTED_CURRENCY`, 1 `MALFORMED_ROW` (a bank line with both credit and debit set).
+`ingested + quarantined = total` is enforced by a database CHECK, so the denominators
+below are not estimates.
+
+### Matching
+
+**Matched 380/492 payment cases cleanly as full three-way matches. 112 carried at least
+one discrepancy, spread across 9 categories. 0 fell through to `__novel__`.**
+
+Of 1,468 ingested rows, 503 match records were produced: 380 `FULL`, 82 `BROKEN` (all
+three legs present, in disagreement), 41 `PARTIAL` (a leg genuinely absent). Every
+ingested transaction belongs to exactly one match record — asserted by a test, because a
+row that vanishes between ingestion and matching would silently shrink the denominator.
+
+| Category | Cases | What was planted |
+|---|---:|---|
+| `TIMING_DIFFERENCE` | 33 | bank credit lagging 1–2 business days |
+| `MDR_FEE_VARIANCE` | 28 | processor charged above the contracted rate |
+| `MISSING_IN_BANK` | 12 | settled and booked, no money arrived |
+| `MISSING_IN_LEDGER` | 10 | settled and credited, never booked |
+| `PARTIAL_CAPTURE` | 10 | captured 60% of the authorised amount |
+| `MISSING_IN_PSP` | 8 | bank and ledger agree, no settlement row |
+| `ROUNDING_DIFFERENCE` | 8 | bank off by ≤ 1.00 INR |
+| `ROUTING_SPLIT` | 6 | one order settled across two acquirers |
+| `DUPLICATE_ENTRY` | 5 | one order paid out twice in full |
+
+8 of those cases carry **two** categories at once (overcharged *and* credited late) — the
+multi-label behaviour that ADR-0012 normalized the schema for.
+
+### What these numbers do NOT cover
+
+Stated here rather than in a footnote, because each is a real gap:
+
+- **Aggregated payouts are not handled at all.** Phase 2 assumes 1:1 settlement — one
+  payment, one bank credit. Real processors net forty payments into a single bank line.
+  This is the assumption most likely to be wrong against real Razorpay files, and
+  supporting it needs a different algorithm (subset-sum with tolerance), not a tweak.
+  See ADR-0014.
+- **No cross-batch matching.** A payment settled in one file and credited in a file
+  ingested later will not match. Every run reconciles what is currently unmatched, with
+  no window spanning ingestion boundaries.
+- **No partial-match confidence scoring.** Confidence is a fixed value per strategy
+  (1.0 exact reference, 0.6 amount+date fallback, 0.3 single leg), not a computed
+  likelihood. The numbers are ordinal, not calibrated.
+- **Four seeded categories have no rule yet**: `FEE_DEDUCTION`, `TAX_WITHHOLDING`,
+  `FX_CONVERSION_DRIFT`, `CHARGEBACK_ADJUSTMENT`. They exist in the taxonomy and would
+  currently surface as `AMOUNT_MISMATCH` or `__novel__`.
+- **The tolerances and windows are judgement calls, not calibrated values**: 1.00 INR
+  rounding, 2.00 INR fee variance, a 2-day timing window, a 3-day fallback pairing
+  window. They were chosen to make cold-start behaviour conservative.
+- **Multi-currency is untested.** Every fixture row is INR. The money layer supports ten
+  currencies and refuses unknown ones, but no cross-currency case has been reconciled.
 
 ---
 
@@ -121,16 +198,21 @@ backend/
     models/              SQLAlchemy ORM (how data is stored)
     schemas/             Pydantic (how data is sent) — deliberately separate
     services/
-      matching/          deterministic engine (Phase 2) — sealed, no AI imports
+      ingestion/         CSV adapters + batch runner with quarantine
+      matching/          deterministic engine — sealed, no AI imports
+        rules.py         11 classification rules, pure functions
+        engine.py        leg pairing and persistence
       agent/             Claude layer (Phase 3)
       trust.py           the automation gate
       health.py          readiness checks
     api/v1/routes/       thin HTTP adapters
     cache/               Redis — cache only, never a source of truth
   alembic/versions/      hand-authored migrations
+  scripts/               fixture generator, fixture reconciliation run
   tests/
     unit/                no I/O, no services
     integration/         real Postgres, opt-in via `-m integration`
+    fixtures/            checked-in dataset + its expected-outcome manifest
 docker-compose.yml
 ```
 
@@ -181,17 +263,13 @@ These are known and deliberate, not oversights.
 - **The audit log is an audit trail, not a tamper-evident one.** `audit_events` is
   append-only by convention and code review. There is no hash chain and no database
   trigger preventing `UPDATE` or `DELETE`. Do not read it as cryptographic provenance.
-- **A match record carries one discrepancy category, not many.** Real discrepancies
-  often have several simultaneous causes. Phase 2 normalizes this into a one-to-many
-  table; Phase 1 keeps a single nullable FK so the taxonomy is not left dangling.
 - **Migrations run on container start.** Convenient for a buildathon, wrong for a real
   deployment, where they belong in a separate step.
 - **No CI.** Tests run locally, by convention. Nothing mechanically blocks a push with
   failing tests.
 - **No authentication.** Every endpoint is open. This is a local-only build.
-- **Ingestion is not idempotent yet because ingestion does not exist.** The database
-  constraint that will make it idempotent (`uq_transactions_source_external_id`) is in
-  place and tested.
+- **Re-ingesting a file is refused, not merged.** Identical content is rejected on hash;
+  a *corrected* file has to go into a fresh batch. There is no amend-in-place path.
 - **`min_sample_size` defaults (30/50/100/250 by severity) are judgement calls, not
   calibrated values.** They were chosen so that cold start errs toward human review.
   Phase 4 should revisit them against real outcome data.
