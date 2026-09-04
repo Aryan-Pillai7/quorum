@@ -421,7 +421,14 @@ def build() -> Dataset:  # noqa: PLR0915 - a flat script of planted cases reads 
                 _settlement_row(i, order, day, gross, mdr, gst, f"UTRAMBIG{i:07d}")
             )
             data.ledger.append(_ledger_row(i, order, day, gross, mdr + gst))
-            data.cases.append(Case(order, [], f"member of ambiguous payout {batch_no}"))
+            data.cases.append(
+                Case(
+                    order,
+                    ["MISSING_IN_BANK"],
+                    f"member of ambiguous payout {batch_no}: the engine refuses to place "
+                    f"it, so it is correctly left unreconciled",
+                )
+            )
 
         b = next_id()
         data.bank.append(_bank_row(b, day, f"UTRAMBIGUOUS{batch_no:04d}", whole_a))

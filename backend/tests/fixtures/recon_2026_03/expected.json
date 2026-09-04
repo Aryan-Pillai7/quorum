@@ -239,12 +239,12 @@
   },
   "expected_cases": {
     "total": 553,
-    "clean": 441,
-    "with_discrepancy": 112,
+    "clean": 435,
+    "with_discrepancy": 118,
     "by_category": {
       "DUPLICATE_ENTRY": 5,
       "MDR_FEE_VARIANCE": 28,
-      "MISSING_IN_BANK": 12,
+      "MISSING_IN_BANK": 18,
       "MISSING_IN_LEDGER": 10,
       "MISSING_IN_PSP": 8,
       "PARTIAL_CAPTURE": 10,

@@ -604,9 +604,14 @@ def _find_by_amount_and_date(
 
 
 def _status_for(ctx: MatchContext, findings: list[Finding]) -> MatchStatus:
-    if ctx.leg_count == 3 and not findings:
+    # A row inside an aggregated payout has all three sources present; its bank leg is
+    # shared with its siblings and hangs off the group's record (ADR-0019). Calling that
+    # PARTIAL would assert a leg is missing, which is false, and would understate the
+    # reconciliation rate by every row that settled in a batch.
+    effective_legs = ctx.leg_count + (1 if ctx.settlement_group_present else 0)
+    if effective_legs >= 3 and not findings:
         return MatchStatus.FULL
-    if ctx.leg_count == 3:
+    if effective_legs >= 3:
         return MatchStatus.BROKEN
     return MatchStatus.PARTIAL
 

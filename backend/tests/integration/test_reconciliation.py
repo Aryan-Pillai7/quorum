@@ -164,8 +164,18 @@ def test_every_ingested_transaction_belongs_to_a_match_record(reconciled):
 
 
 def test_clean_cases_produce_full_matches_with_no_findings(reconciled):
+    """Clean payment cases, plus one record per resolved payout.
+
+    An aggregated payout produces a further FULL record of its own: the group's record
+    holding the bank credit. It is a real reconciliation outcome -- that credit is fully
+    explained -- so it counts, and it is stated separately rather than folded in.
+    """
     _, ctx = reconciled
-    assert ctx["result"].full_matches == MANIFEST["expected_cases"]["clean"]
+    expected = (
+        MANIFEST["expected_cases"]["clean"]
+        + MANIFEST["expected_aggregations"]["by_expected_status"].get("RESOLVED", 0)
+    )
+    assert ctx["result"].full_matches == expected
 
 
 def test_each_discrepancy_category_matches_what_was_planted(reconciled):
@@ -179,7 +189,15 @@ def test_each_discrepancy_category_matches_what_was_planted(reconciled):
         )
     ).all()
     observed = {code: count for code, count in rows}
-    assert observed == MANIFEST["expected_cases"]["by_category"]
+
+    # AGGREGATION_AMBIGUOUS is raised against a payout, not against a payment case, so it
+    # is counted from the aggregation manifest rather than from the per-case one.
+    expected = dict(MANIFEST["expected_cases"]["by_category"])
+    ambiguous = MANIFEST["expected_aggregations"]["by_expected_status"].get("AMBIGUOUS", 0)
+    if ambiguous:
+        expected["AGGREGATION_AMBIGUOUS"] = ambiguous
+
+    assert observed == expected
 
 
 def test_nothing_falls_through_to_novel(reconciled):
@@ -264,3 +282,169 @@ def test_re_running_the_engine_does_not_duplicate_findings(reconciled):
     after = session.execute(text("SELECT COUNT(*) FROM discrepancies")).scalar_one()
     assert after == before
     assert before == ctx["result"].discrepancies
+
+
+# --- aggregated payouts (Phase 4, ADR-0019) -------------------------------------------
+
+AGGREGATIONS = MANIFEST["expected_aggregations"]
+
+
+def test_every_planted_aggregation_is_detected(reconciled):
+    """One group per planted payout, no more and no fewer."""
+    session, _ = reconciled
+    total = session.execute(text("SELECT COUNT(*) FROM settlement_groups")).scalar_one()
+    assert total == AGGREGATIONS["total"]
+
+
+def test_group_outcomes_match_what_was_planted(reconciled):
+    """Both the method used and the verdict reached, per group."""
+    session, _ = reconciled
+    rows = session.execute(
+        text("SELECT method, status, COUNT(*) FROM settlement_groups GROUP BY method, status")
+    ).all()
+    observed = {(method, status): count for method, status, count in rows}
+
+    expected: dict[tuple[str, str], int] = {}
+    for group in AGGREGATIONS["groups"]:
+        key = (group["expected_method"], group["expected_status"])
+        expected[key] = expected.get(key, 0) + 1
+
+    assert observed == expected
+
+
+def test_resolved_groups_claim_exactly_the_planted_settlement_rows(reconciled):
+    """The grouping itself must be right, not merely the count of groups."""
+    session, _ = reconciled
+    for group in AGGREGATIONS["groups"]:
+        if group["expected_status"] != "RESOLVED":
+            continue
+        members = session.execute(
+            text(
+                "SELECT t.external_id FROM transactions t "
+                "JOIN settlement_groups g ON g.id = t.settlement_group_id "
+                "JOIN transactions b ON b.id = g.bank_transaction_id "
+                "WHERE b.counterparty_ref = :ref ORDER BY t.external_id"
+            ),
+            {"ref": group["payout_utr"]},
+        ).scalars().all()
+        assert list(members) == group["members"], group["payout_utr"]
+
+
+def test_resolved_groups_sum_to_their_bank_credit(reconciled):
+    session, _ = reconciled
+    mismatched = session.execute(
+        text(
+            "SELECT COUNT(*) FROM settlement_groups "
+            "WHERE status = 'RESOLVED' AND members_total_minor <> bank_amount_minor"
+        )
+    ).scalar_one()
+    assert mismatched == 0
+
+
+def test_an_ambiguous_group_claims_no_rows_and_records_every_candidate_set(reconciled):
+    """The refusal to guess, asserted end to end."""
+    session, _ = reconciled
+    rows = session.execute(
+        text(
+            "SELECT member_count, solution_count, evidence FROM settlement_groups "
+            "WHERE status = 'AMBIGUOUS'"
+        )
+    ).all()
+    assert len(rows) == AGGREGATIONS["by_expected_status"].get("AMBIGUOUS", 0)
+    for member_count, solution_count, evidence in rows:
+        assert member_count == 0, "an ambiguous group must not claim any settlement row"
+        assert solution_count >= 2
+        assert len(evidence["competing_solutions"]) >= 2
+
+
+def test_ambiguous_payouts_raise_a_finding_rather_than_passing_quietly(reconciled):
+    session, _ = reconciled
+    findings = session.execute(
+        text("SELECT COUNT(*) FROM discrepancies WHERE category_code = 'AGGREGATION_AMBIGUOUS'")
+    ).scalar_one()
+    assert findings == AGGREGATIONS["by_expected_status"].get("AMBIGUOUS", 0)
+
+
+def test_a_bank_credit_is_claimed_by_at_most_one_group(reconciled):
+    session, _ = reconciled
+    duplicated = session.execute(
+        text(
+            "SELECT COUNT(*) FROM (SELECT bank_transaction_id FROM settlement_groups "
+            "GROUP BY bank_transaction_id HAVING COUNT(*) > 1) AS t"
+        )
+    ).scalar_one()
+    assert duplicated == 0
+
+
+def test_a_settlement_row_belongs_to_at_most_one_group(reconciled):
+    session, _ = reconciled
+    total_members = session.execute(
+        text("SELECT COUNT(*) FROM transactions WHERE settlement_group_id IS NOT NULL")
+    ).scalar_one()
+    assert total_members == AGGREGATIONS["resolved_member_total"]
+
+
+def test_grouped_settlement_rows_are_not_reported_missing_in_bank(reconciled):
+    """The money arrived; it just arrived alongside its siblings."""
+    session, _ = reconciled
+    false_findings = session.execute(
+        text(
+            "SELECT COUNT(*) FROM discrepancies d "
+            "JOIN match_records m ON m.id = d.match_record_id "
+            "JOIN transactions t ON t.id = m.psp_transaction_id "
+            "WHERE d.category_code = 'MISSING_IN_BANK' AND t.settlement_group_id IS NOT NULL"
+        )
+    ).scalar_one()
+    assert false_findings == 0
+
+
+def test_each_group_has_exactly_one_match_record_holding_the_bank_leg(reconciled):
+    """ADR-0019: the group carries the bank leg so the unique index still applies."""
+    session, _ = reconciled
+    bad = session.execute(
+        text(
+            "SELECT COUNT(*) FROM settlement_groups g WHERE ("
+            "  SELECT COUNT(*) FROM match_records m "
+            "  WHERE m.settlement_group_id = g.id AND m.bank_transaction_id = g.bank_transaction_id"
+            ") <> 1"
+        )
+    ).scalar_one()
+    assert bad == 0
+
+
+def test_group_member_records_carry_no_bank_leg(reconciled):
+    """No individual settlement row matched that credit -- the set did."""
+    session, _ = reconciled
+    offenders = session.execute(
+        text(
+            "SELECT COUNT(*) FROM match_records "
+            "WHERE psp_transaction_id IS NOT NULL "
+            "AND settlement_group_id IS NOT NULL AND bank_transaction_id IS NOT NULL"
+        )
+    ).scalar_one()
+    assert offenders == 0
+
+
+def test_aggregated_records_use_an_aggregation_strategy(reconciled):
+    session, _ = reconciled
+    strategies = session.execute(
+        text(
+            "SELECT DISTINCT strategy FROM match_records WHERE settlement_group_id IS NOT NULL"
+        )
+    ).scalars().all()
+    assert set(strategies) <= {"AGGREGATE_SHARED_REFERENCE", "AGGREGATE_SUBSET_SUM"}
+
+
+def test_group_evidence_names_the_rows_and_the_bounds(reconciled):
+    """Traceability holds for aggregation exactly as it does for every other outcome."""
+    session, _ = reconciled
+    rows = session.execute(
+        text("SELECT status, evidence, notes FROM settlement_groups")
+    ).all()
+    assert rows
+    for status, evidence, notes in rows:
+        assert notes and notes.strip()
+        assert "bounds" in evidence
+        assert evidence["bank_amount_minor"] > 0
+        if status == "RESOLVED":
+            assert len(evidence["members"]) >= 2
