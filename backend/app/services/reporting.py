@@ -252,6 +252,38 @@ def latest_explanations(session: Session, discrepancy_ids: list[str]) -> dict[st
     return latest
 
 
+# Evidence keys that name an amount in minor units. Rendered as currency so the UI does
+# not have to know which fields are money -- it just renders label/value pairs.
+_MINOR_UNIT_SUFFIX = "_minor"
+
+# Keys that describe the comparison rather than participate in it. Shown separately.
+_META_KEYS = frozenset({"compared", "basis", "note", "rules_evaluated", "bounds"})
+
+
+def evidence_rows(evidence: dict[str, Any]) -> list[dict[str, Any]]:
+    """Flatten a rule's stored evidence into ordered label/value pairs for display.
+
+    Every rule records a differently shaped evidence dict, so the alternative is a
+    per-category renderer in the frontend that drifts every time a rule changes. Deriving
+    the rows here means the UI renders any category, including ones added later, without
+    knowing anything about them.
+    """
+    rows: list[dict[str, Any]] = []
+    for key, value in evidence.items():
+        if key in _META_KEYS or value is None:
+            continue
+        if isinstance(value, dict | list):
+            continue  # nested structures are shown in the raw evidence panel instead
+        row = {
+            "key": key,
+            "label": key.replace("_minor", "").replace("_", " ").strip().capitalize(),
+            "value": value,
+            "is_money": key.endswith(_MINOR_UNIT_SUFFIX) and isinstance(value, int),
+        }
+        rows.append(row)
+    return rows
+
+
 def discrepancy_detail(
     session: Session, *, limit: int = 50, category_code: str | None = None
 ) -> list[dict[str, Any]]:
@@ -283,6 +315,11 @@ def discrepancy_detail(
                 "delta_minor": discrepancy.delta_minor,
                 "deterministic_summary": discrepancy.summary,
                 "evidence": discrepancy.evidence,
+                # Pre-flattened for display. The raw dict stays alongside so nothing is
+                # hidden by the formatting.
+                "evidence_rows": evidence_rows(discrepancy.evidence),
+                "compared": discrepancy.evidence.get("compared"),
+                "has_explanation": bool(payload.get("explanation")),
                 "match_status": match.status.value,
                 "match_strategy": match.strategy.value,
                 "explanation": payload.get("explanation"),

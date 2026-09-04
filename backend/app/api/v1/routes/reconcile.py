@@ -17,6 +17,7 @@ from app.api.deps import get_db
 from app.config import Settings, get_settings
 from app.models import ActorType
 from app.services import audit, reporting
+from app.services.agent import explain as explain_service
 from app.services.agent import explain_discrepancies
 from app.services.matching import reconcile
 
@@ -94,53 +95,7 @@ def run_reconciliation(
             skip_explained=not force_reexplain,
         )
 
-        for item in run.explained:
-            # Every finding gets an audit row, explained or not: the gate decision is
-            # itself an auditable event, and it happened whether or not a model replied.
-            audit.record(
-                db,
-                action="agent.explained" if item.explanation else "agent.gated_only",
-                entity_type="discrepancy",
-                entity_id=item.discrepancy_id,
-                actor_type=ActorType.AGENT if item.explanation else ActorType.SYSTEM,
-                actor_id=run.model if item.explanation else None,
-                payload={
-                    "category_code": item.category_code,
-                    "rule_id": item.rule_id,
-                    "match_key": item.match_key,
-                    "delta_minor": item.delta_minor,
-                    "explanation": item.explanation,
-                    "corrective_action": item.corrective_action,
-                    "model_confidence": item.model_confidence,
-                    "explanation_status": item.explanation_status,
-                    "gate_decision": item.gate_decision,
-                    "gate_reason": item.gate_reason,
-                    "is_cold_start": item.is_cold_start,
-                    "observations_needed": item.observations_needed,
-                    "model": run.model,
-                    "advisory_only": True,
-                },
-            )
-
-        for batch in run.telemetry:
-            audit.record(
-                db,
-                action="agent.batch",
-                entity_type="discrepancy_category",
-                entity_id=batch.category_code,
-                actor_type=ActorType.AGENT,
-                actor_id=run.model,
-                payload={
-                    "batch_size": batch.batch_size,
-                    "latency_ms": batch.latency_ms,
-                    "prompt_tokens": batch.prompt_tokens,
-                    "output_tokens": batch.output_tokens,
-                    "attempts": batch.attempts,
-                    "explained": batch.explained,
-                    "failed": batch.failed,
-                    "error": batch.error,
-                },
-            )
+        explain_service.persist_explanation_run(db, run)
 
         db.commit()
 

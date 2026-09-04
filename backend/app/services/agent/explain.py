@@ -179,11 +179,17 @@ def explain_discrepancies(
     limit_per_category: int | None = None,
     settings: Settings | None = None,
     skip_explained: bool = True,
+    category_codes: list[str] | None = None,
 ) -> ExplanationRun:
     """Explain the discrepancies in the database, batched one call per category.
 
     Runs the trust gate for every discrepancy regardless of whether the agent layer is
     available, so gating is never contingent on the model answering.
+
+    `category_codes` narrows the run to specific categories. It changes which findings
+    are batched, never how -- the drill-down's on-demand generate action reuses this exact
+    function rather than adding a per-finding call path (ADR-0018 still holds: one call
+    per category, never one per finding).
 
     `skip_explained` (default on) omits findings that already have an explanation in the
     audit trail. Explanations of an unchanged deterministic finding do not improve on
@@ -210,9 +216,13 @@ def explain_discrepancies(
             ).all()
         }
 
+    wanted = set(category_codes) if category_codes else None
+
     by_category: dict[str, list[tuple]] = {}
     skipped = 0
     for discrepancy, match, category, trust in rows:
+        if wanted is not None and category.code not in wanted:
+            continue
         if str(discrepancy.id) in already_explained:
             skipped += 1
             continue
@@ -361,3 +371,65 @@ def explain_discrepancies(
             )
 
     return run
+
+
+def persist_explanation_run(session: Session, run: ExplanationRun) -> None:
+    """Write a run's findings and batch telemetry to the audit trail.
+
+    Extracted because this had already been copy-pasted into the reconcile route and the
+    explain_all script, and Phase 7 would have made it three. The drill-down's generate
+    action calls this rather than growing a fourth copy that could drift on which fields
+    it records.
+
+    Does not commit: the caller owns the transaction, matching `audit.record`.
+    """
+    from app.models import ActorType
+    from app.services import audit
+
+    for item in run.explained:
+        # Every finding gets a row, explained or not. The gate decision is itself an
+        # auditable event and it happened whether or not a model replied.
+        audit.record(
+            session,
+            action="agent.explained" if item.explanation else "agent.gated_only",
+            entity_type="discrepancy",
+            entity_id=item.discrepancy_id,
+            actor_type=ActorType.AGENT if item.explanation else ActorType.SYSTEM,
+            actor_id=run.model if item.explanation else None,
+            payload={
+                "category_code": item.category_code,
+                "rule_id": item.rule_id,
+                "match_key": item.match_key,
+                "delta_minor": item.delta_minor,
+                "explanation": item.explanation,
+                "corrective_action": item.corrective_action,
+                "model_confidence": item.model_confidence,
+                "explanation_status": item.explanation_status,
+                "gate_decision": item.gate_decision,
+                "gate_reason": item.gate_reason,
+                "is_cold_start": item.is_cold_start,
+                "observations_needed": item.observations_needed,
+                "model": run.model,
+                "advisory_only": True,
+            },
+        )
+
+    for batch in run.telemetry:
+        audit.record(
+            session,
+            action="agent.batch",
+            entity_type="discrepancy_category",
+            entity_id=batch.category_code,
+            actor_type=ActorType.AGENT,
+            actor_id=run.model,
+            payload={
+                "batch_size": batch.batch_size,
+                "latency_ms": batch.latency_ms,
+                "prompt_tokens": batch.prompt_tokens,
+                "output_tokens": batch.output_tokens,
+                "attempts": batch.attempts,
+                "explained": batch.explained,
+                "failed": batch.failed,
+                "error": batch.error,
+            },
+        )

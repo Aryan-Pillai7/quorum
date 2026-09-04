@@ -13,9 +13,8 @@ import sys
 from sqlalchemy.orm import sessionmaker
 
 from app.db.session import engine
-from app.models import ActorType
-from app.services import audit
 from app.services.agent import explain_discrepancies
+from app.services.agent.explain import persist_explanation_run
 
 
 def main() -> None:
@@ -23,31 +22,7 @@ def main() -> None:
     session = sessionmaker(bind=engine)()
     try:
         run = explain_discrepancies(session, limit_per_category=limit)
-        for item in run.explained:
-            audit.record(
-                session,
-                action="agent.explained" if item.explanation else "agent.gated_only",
-                entity_type="discrepancy",
-                entity_id=item.discrepancy_id,
-                actor_type=ActorType.AGENT if item.explanation else ActorType.SYSTEM,
-                actor_id=run.model if item.explanation else None,
-                payload={
-                    "category_code": item.category_code,
-                    "rule_id": item.rule_id,
-                    "match_key": item.match_key,
-                    "delta_minor": item.delta_minor,
-                    "explanation": item.explanation,
-                    "corrective_action": item.corrective_action,
-                    "model_confidence": item.model_confidence,
-                    "explanation_status": item.explanation_status,
-                    "gate_decision": item.gate_decision,
-                    "gate_reason": item.gate_reason,
-                    "is_cold_start": item.is_cold_start,
-                    "observations_needed": item.observations_needed,
-                    "model": run.model,
-                    "advisory_only": True,
-                },
-            )
+        persist_explanation_run(session, run)
         session.commit()
 
         print(f"skipped (already explained): {run.skipped_already_explained}")
