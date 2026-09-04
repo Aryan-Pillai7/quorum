@@ -20,7 +20,7 @@ Two of three agreeing is a lead. Three agreeing is a reconciliation.
 
 ---
 
-## Status: Phase 3 (demo layer) complete
+## Status: Phase 4 (aggregated payouts) complete
 
 - ✅ Postgres schema with migrations and a seeded 17-category discrepancy taxonomy
 - ✅ Trust-gate policy logic, with tests
@@ -30,7 +30,8 @@ Two of three agreeing is a lead. Three agreeing is a reconciliation.
 - ✅ Deterministic three-way matching engine with multi-label classification
 - ✅ Gemini explanation layer, gated and advisory-only
 - ✅ `POST /v1/reconcile` and a dashboard rendering real data
-- ⬜ Trust scores learning from real outcomes (Phase 4)
+- ✅ Aggregated payouts — N settlement rows explaining one bank credit
+- ⬜ Trust scores learning from real outcomes
 
 **Every trust score in the database is still a cold-start seed at `sample_size = 0`.** No
 human has confirmed or overridden an agent proposal yet, so nothing has been scored. The
@@ -66,9 +67,89 @@ That contrast is the argument. The model is confident about both. The system aut
 neither, and can say precisely why for each — one needs evidence it has not gathered, the
 other will never be allowed regardless of how much evidence it gathers.
 
-`GET /v1/narrated` returns exactly these two cases as JSON.
+`GET /v1/narrated` returns these cases as JSON.
+
+**A third case, added in Phase 4** — the engine detecting its own uncertainty:
+
+> A bank credit of ₹1,005.03 matches two different sets of settlement records. It could
+> be a single payment, or the combined total of two others. **The system cannot determine
+> which grouping is correct**, so it groups nothing and asks for a human.
+
+That is the whole argument in one card: the system knows the difference between an answer
+and a guess.
 
 ---
+
+---
+
+---
+
+## Phase 4 results — aggregated payouts
+
+Real processors net many payments into a single bank credit. Phase 2 assumed 1:1 and got
+this actively wrong: with N settlement rows sharing a payout reference, it matched the
+first of them to the credit and reported an amount mismatch on the rest. This phase
+removes that assumption for the settlement→bank leg. The ledger→settlement leg is
+untouched.
+
+Same `recon_2026_03` fixture, extended with 16 planted payout cases.
+
+| Outcome | Planted | Detected | Notes |
+|---|---:|---:|---|
+| Shared-reference payouts | 10 | **10** | 43 settlement rows, all correctly assigned |
+| Subset-sum payouts | 4 | **4** | 12 settlement rows, all correctly assigned |
+| Ambiguous payouts | 2 | **2** | correctly refused — no grouping claimed |
+| **Total** | **16** | **16** | 55/55 member rows correctly assigned |
+
+Every Phase 2 category count is unchanged, so nothing regressed. `MISSING_IN_BANK` rises
+from 12 to 18 — the six settlement rows inside the two ambiguous payouts stay
+deliberately unreconciled, which is what they are.
+
+### The finding worth repeating
+
+**Blind amount matching over an unfiltered pool is not reconciliation, it is coincidence.**
+
+Bounded only by date and currency, the candidate pool for a payout was **87–166 rows** —
+past the 40-row search cap, so the search declined to start and resolved **0 of 4**
+designed cases. That refusal was correct; the bound was too weak. Excluding settlement
+rows whose reference already matches some bank credit (those are matchable 1:1 and have
+no business in an aggregation pool) took the pool to **3–13 rows**, and all four
+resolved.
+
+The fix was a structural fact about references, not a cleverer algorithm. Two payments of
+₹1,200 and one credit of ₹1,200 tells you nothing about which payment arrived.
+
+### Ambiguity is an outcome, not an error
+
+When several distinct sets each sum to the credit, the engine forms no group, claims no
+row, records every competing set, and routes to a human. The search stops at the second
+solution because uniqueness is the only question worth asking.
+
+This deliberately produces a *lower* match rate. A silently-chosen grouping attributes
+money to the wrong payments and looks like a better number while being wrong.
+
+Two settlement rows of equal value count as distinct solutions — which one the credit
+covers is exactly what is unknown.
+
+### What aggregation does NOT handle
+
+- **Partial aggregation.** A credit covering *some* of a payout, with the rest arriving
+  separately, is not modelled. The group either explains the whole credit or it does not.
+- **Cross-currency aggregation.** Candidates are same-currency only. A payout converting
+  several currencies into one credit will not resolve.
+- **Aggregation combined with another discrepancy.** A payout whose members sum to the
+  credit *minus a fee variance* resolves as INCONCLUSIVE, not as "aggregated, with a fee
+  problem". The two shapes do not compose.
+- **Aggregation across ingestion batches.** Candidates come from the current unmatched
+  set; a payout split across two uploads will not group.
+- **Pools above 40 candidates are not searched at all.** Reported as INCONCLUSIVE with
+  the candidate count, never as "no aggregation exists" — but it is a refusal, not an
+  answer.
+- **The search bounds are judgement calls**: 3-day window, 40-candidate cap, 50-row group
+  cap, 200k node budget. Sized for a laptop, not tuned against production volumes.
+- **One cross-cutting rule is not enforced by the schema**: a member's match record must
+  have `bank_transaction_id IS NULL`. An integration test asserts it; the type system
+  cannot.
 
 ---
 
