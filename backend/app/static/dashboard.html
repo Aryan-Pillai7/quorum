@@ -256,6 +256,97 @@ function render(d, cases) {
     "<b>Read this with the numbers.</b><ul>" +
     d.caveats.map((c) => "<li>" + esc(c) + "</li>").join("") + "</ul>";
 
+  // The common case on a 15s poll is that nothing changed. Rebuilding the table anyway
+  // would destroy any open drill-down for no benefit, so compare first and leave the DOM
+  // alone when the data is identical. Scoped to the table: everything else on the page
+  // still refreshes, which an early return from render() would have silently skipped.
+  const signature = JSON.stringify(d.categories);
+  if (signature !== lastCategorySignature) {
+    lastCategorySignature = signature;
+    renderCategories(d);
+  }
+
+  document.getElementById("cases").innerHTML = cases.length
+    ? cases.map((c) => `
+      <div class="case">
+        <h3>${esc(c.match_key)} — ${esc(c.category_code)}</h3>
+        <div class="meta">
+          rule <code>${esc(c.rule_id)}</code> ·
+          delta ${money(c.delta_minor)} ·
+          model ${esc(c.model)} (confidence: ${esc(c.model_confidence)}, advisory only)
+        </div>
+        <p><span class="label">AI explanation</span><br>${esc(c.agent_explanation)}</p>
+        <p><span class="label">Suggested action</span><br>${esc(c.agent_corrective_action)}</p>
+        <p>
+          <span class="pill ${pillClass(c.gate_decision)}">${esc(c.gate_decision)}</span>
+          <span class="why"> ${esc(c.why_held_back_plain)}</span>
+        </p>
+      </div>`).join("")
+    : "<p class='why'>No explained findings yet. Run <code>POST /v1/reconcile</code>.</p>";
+}
+
+// --- category drill-down -------------------------------------------------------------
+// Explanations arrive inline with the findings, so revealing one is a DOM toggle with no
+// network call. Generating a missing one is a POST that spends API quota. The two are
+// styled differently on purpose: one is instant, the other does work.
+
+let lastCategorySignature = null;
+const drillCache = {};
+
+// What the user currently has open. The dashboard polls every 15s and re-renders the
+// category table, which would otherwise throw this away mid-read -- the drill-down was
+// added into a table an older polling loop rebuilds wholesale.
+const openCategories = new Set();
+const expandedFindings = new Set();
+
+async function toggleCategory(code) {
+  const row = document.querySelector(`tr.cat[data-code="${CSS.escape(code)}"]`);
+  const panel = document.querySelector(`tr.drillrow[data-for="${CSS.escape(code)}"]`);
+  if (!row || !panel) return;
+
+  const opening = panel.hidden;
+  panel.hidden = !opening;
+  row.classList.toggle("open", opening);
+  if (opening) openCategories.add(code);
+  else openCategories.delete(code);
+  if (!opening) return;
+
+  const cell = panel.querySelector("td.drill");
+  if (drillCache[code]) {
+    cell.innerHTML = renderDrill(drillCache[code]);
+    wireDrill(code, cell);
+    return;
+  }
+
+  cell.innerHTML = '<div class="drill-head">Loading findings…</div>';
+  try {
+    const data = await fetch(`/v1/categories/${encodeURIComponent(code)}/findings`)
+      .then((r) => r.json());
+    drillCache[code] = data;
+    cell.innerHTML = renderDrill(data);
+    wireDrill(code, cell);
+  } catch (e) {
+    cell.innerHTML = `<div class="drill-head err">could not load: ${esc(e.message)}</div>`;
+  }
+}
+
+function restoreOpenCategories() {
+  // Rebuilt rows come back collapsed, so re-open what the user had open. Rendered from
+  // the cache rather than refetched: this is putting the view back, not loading it again.
+  openCategories.forEach((code) => {
+    const row = document.querySelector(`tr.cat[data-code="${CSS.escape(code)}"]`);
+    const panel = document.querySelector(`tr.drillrow[data-for="${CSS.escape(code)}"]`);
+    if (!row || !panel || !drillCache[code]) return;
+    panel.hidden = false;
+    row.classList.add("open");
+    const cell = panel.querySelector("td.drill");
+    cell.innerHTML = renderDrill(drillCache[code]);
+    wireDrill(code, cell);
+  });
+}
+
+
+function renderCategories(d) {
   document.getElementById("cats").innerHTML = d.categories.map((c) => {
     const pct = Math.round((c.sample_size / c.min_sample_size) * 100);
     return `<tr class="cat" data-code="${esc(c.code)}">
@@ -284,59 +375,7 @@ function render(d, cases) {
     row.addEventListener("click", () => toggleCategory(row.dataset.code));
   });
 
-  document.getElementById("cases").innerHTML = cases.length
-    ? cases.map((c) => `
-      <div class="case">
-        <h3>${esc(c.match_key)} — ${esc(c.category_code)}</h3>
-        <div class="meta">
-          rule <code>${esc(c.rule_id)}</code> ·
-          delta ${money(c.delta_minor)} ·
-          model ${esc(c.model)} (confidence: ${esc(c.model_confidence)}, advisory only)
-        </div>
-        <p><span class="label">AI explanation</span><br>${esc(c.agent_explanation)}</p>
-        <p><span class="label">Suggested action</span><br>${esc(c.agent_corrective_action)}</p>
-        <p>
-          <span class="pill ${pillClass(c.gate_decision)}">${esc(c.gate_decision)}</span>
-          <span class="why"> ${esc(c.why_held_back_plain)}</span>
-        </p>
-      </div>`).join("")
-    : "<p class='why'>No explained findings yet. Run <code>POST /v1/reconcile</code>.</p>";
-}
-
-// --- category drill-down -------------------------------------------------------------
-// Explanations arrive inline with the findings, so revealing one is a DOM toggle with no
-// network call. Generating a missing one is a POST that spends API quota. The two are
-// styled differently on purpose: one is instant, the other does work.
-
-const drillCache = {};
-
-async function toggleCategory(code) {
-  const row = document.querySelector(`tr.cat[data-code="${CSS.escape(code)}"]`);
-  const panel = document.querySelector(`tr.drillrow[data-for="${CSS.escape(code)}"]`);
-  if (!row || !panel) return;
-
-  const opening = panel.hidden;
-  panel.hidden = !opening;
-  row.classList.toggle("open", opening);
-  if (!opening) return;
-
-  const cell = panel.querySelector("td.drill");
-  if (drillCache[code]) {
-    cell.innerHTML = renderDrill(drillCache[code]);
-    wireDrill(code, cell);
-    return;
-  }
-
-  cell.innerHTML = '<div class="drill-head">Loading findings…</div>';
-  try {
-    const data = await fetch(`/v1/categories/${encodeURIComponent(code)}/findings`)
-      .then((r) => r.json());
-    drillCache[code] = data;
-    cell.innerHTML = renderDrill(data);
-    wireDrill(code, cell);
-  } catch (e) {
-    cell.innerHTML = `<div class="drill-head err">could not load: ${esc(e.message)}</div>`;
-  }
+  restoreOpenCategories();
 }
 
 function renderDrill(d) {
@@ -393,8 +432,9 @@ function renderFinding(f) {
          stands on its own — it was computed by field comparison, not by a model.
        </p>`;
 
+  const open = expandedFindings.has(f.discrepancy_id) ? " open" : "";
   return `
-    <details class="finding">
+    <details class="finding" data-id="${esc(f.discrepancy_id)}"${open}>
       <summary>
         <div>
           <div class="ref">${esc(f.match_key)}</div>
@@ -420,6 +460,13 @@ function renderFinding(f) {
 }
 
 function wireDrill(code, cell) {
+  cell.querySelectorAll("details.finding").forEach((el) => {
+    el.addEventListener("toggle", () => {
+      if (el.open) expandedFindings.add(el.dataset.id);
+      else expandedFindings.delete(el.dataset.id);
+    });
+  });
+
   const button = cell.querySelector("button.gen");
   if (!button) return;
   button.addEventListener("click", async (event) => {
