@@ -77,7 +77,18 @@
   }
   .wordmark { font: 600 27px/1 var(--serif); letter-spacing: -0.015em; margin: 0; }
   .tagline { color: var(--ink-muted); font-size: 14px; padding-bottom: 2px; }
-  .updated { margin-left: auto; color: var(--ink-muted); font-size: 13px; }
+  .updated { color: var(--ink-muted); font-size: 13px; }
+
+  /* Who is acting. Approvals and audits are meant to be different people (ADR-0025), so
+     the name is visible and switchable rather than buried in browser storage. */
+  .reviewer { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+  .reviewer label { color: var(--ink-muted); font-size: 13px; }
+  .reviewer input {
+    border: 1px solid var(--rule); border-radius: 6px; padding: 5px 9px;
+    font: 500 13px var(--sans); color: var(--ink); background: var(--surface);
+    width: 130px;
+  }
+  .reviewer input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
   main { max-width: 1180px; margin: 0 auto; padding: 28px 32px 72px; }
 
@@ -351,6 +362,11 @@
   <div class="masthead-inner">
     <h1 class="wordmark">Quorum</h1>
     <span class="tagline">Three-way payment reconciliation</span>
+    <span class="reviewer">
+      <label for="reviewer">Reviewing as</label>
+      <input id="reviewer" type="text" autocomplete="off" spellcheck="false"
+             placeholder="your name">
+    </span>
     <span class="updated" id="status"></span>
   </div>
 </header>
@@ -572,6 +588,25 @@ const expandedFindings = new Set();
 // generate button and every approval action go through this same path -- there is not a
 // second auth mechanism.
 let operatorToken = null;
+
+// Whoever is acting right now. Persisted so a reload keeps it, and read at click time so
+// switching between an approval and its audit takes effect immediately.
+const REVIEWER_KEY = "quorum.reviewer";
+
+function currentReviewer() {
+  const field = document.getElementById("reviewer");
+  const typed = field && field.value.trim();
+  return typed || window.localStorage.getItem(REVIEWER_KEY) || "operator";
+}
+
+function wireReviewerField() {
+  const field = document.getElementById("reviewer");
+  if (!field) return;
+  field.value = window.localStorage.getItem(REVIEWER_KEY) || "";
+  field.addEventListener("input", () => {
+    window.localStorage.setItem(REVIEWER_KEY, field.value.trim());
+  });
+}
 
 function requireToken(reason) {
   if (operatorToken) return operatorToken;
@@ -885,7 +920,7 @@ function reviewActions(f) {
 
 
 function wireReviewActions(code, cell) {
-  const approverId = () => window.localStorage.getItem("quorum.reviewer") || "operator";
+  const approverId = () => currentReviewer();
 
   const fail = (id, message) => {
     const slot = cell.querySelector(`[data-err="${CSS.escape(id)}"]`);
@@ -994,6 +1029,7 @@ function wireDrill(code, cell) {
   });
 }
 
+wireReviewerField();
 load();
 setInterval(load, 15000);
 </script>
