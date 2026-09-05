@@ -26,6 +26,13 @@
     --review-ink: #7A5A18;  --review-fill: #F7F0DE;
     --block-ink:  #94382F;  --block-fill:  #FAEAE7;
 
+    /* Severity is a different axis from gate state, so it gets its own ramp and its own
+       shape language (a bar, never a pill). LOW reuses --ink-muted and CRITICAL reuses
+       --block-ink, so only two new values are needed. Both sit clear of --review-ink so a
+       severity bar is not mistaken for a human-review pill beside it. */
+    --sev-medium: #8C6F3A;
+    --sev-high:   #96543A;
+
     --serif: "Source Serif 4", Georgia, "Times New Roman", serif;
     --sans: Inter, -apple-system, "Segoe UI", system-ui, sans-serif;
     /* A real monospace where one exists. Never Courier, and never for amounts. */
@@ -159,7 +166,19 @@
   tr.cat.open .chev { transform: rotate(90deg); color: var(--accent); }
 
   .cat-name { font-weight: 500; }
-  .cat-sev { color: var(--ink-muted); font-size: 12.5px; margin-top: 2px; }
+
+  /* Bar, not a pill: severity and gate state are different axes and must not share a
+     shape. Height carries the ordinal as well as colour, so the ranking survives at 3px
+     wide and for anyone who cannot separate two muted browns by hue. */
+  .sev { display: inline-flex; align-items: flex-end; gap: 7px; height: 13px; margin-top: 5px; }
+  .sev-bar { width: 3px; border-radius: 1px; flex: none; }
+  .sev-label { font-size: 12.5px; line-height: 1.05; color: var(--ink-muted); }
+  .sev-low .sev-bar       { height: 0; }
+  .sev-medium .sev-bar    { height: 6px;  background: var(--sev-medium); }
+  .sev-high .sev-bar      { height: 10px; background: var(--sev-high); }
+  .sev-critical .sev-bar  { height: 13px; background: var(--block-ink); }
+  /* Only CRITICAL escalates to coloured text. One category in ten, so it stays a signal. */
+  .sev-critical .sev-label { color: var(--block-ink); font-weight: 500; }
 
   /* Discrete evidence ticker: counted observations, not percent-complete. */
   .ticker { display: flex; gap: 2px; margin-bottom: 6px; }
@@ -252,7 +271,22 @@
   .kv .k { color: var(--ink-muted); }
   .kv .v { text-align: right; }
 
-  .attribution { color: var(--ink-muted); font-size: 12.5px; margin-top: 12px; line-height: 1.6; }
+  /* Three facts, three units. Not a sentence. */
+  .meta-grid {
+    display: grid; grid-template-columns: auto 1fr; gap: 5px 14px;
+    margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--rule);
+    font-size: 12.5px; align-items: center;
+  }
+  .meta-grid dt { color: var(--ink-muted); }
+  .meta-grid dd { margin: 0; }
+  .meta-grid dd.model { font-family: var(--mono); font-size: 12px; }
+  .meta-self { color: var(--ink-muted); }
+
+  /* Structural, not per-finding: stated once here instead of repeated on every row. */
+  .h4-note { font: 400 12px/1 var(--sans); color: var(--ink-muted); margin-left: 8px; }
+
+  /* A formatted instant. The raw ISO stays available on hover. */
+  .instant { border-bottom: 1px dotted var(--rule); cursor: help; }
   .missing { color: var(--ink-muted); font-size: 13.5px; }
 
   .sub-label {
@@ -278,6 +312,7 @@
   .case h3 { font: 600 16px/1.35 var(--serif); margin: 0 0 3px; }
   .case .meta { color: var(--ink-muted); font-size: 12.5px; margin-bottom: 12px; }
   .case .meta .ref-inline { font-family: var(--mono); font-size: 12px; }
+  .case .meta .meta-gap { margin-left: 20px; }
   .case p { margin: 0 0 12px; font-size: 14px; }
   .case .held { color: var(--ink-muted); font-size: 13px; }
 
@@ -347,7 +382,8 @@
     <div class="section-head"><h2>Worked example</h2></div>
     <p class="section-sub">
       One transaction end to end: what the rules found, what the agent said about it, and
-      why it was held back.
+      why it was held back. Agent output is advisory throughout; nothing here was applied
+      without a person.
     </p>
     <div id="cases" class="loading">Loading</div>
   </section>
@@ -368,6 +404,48 @@ const pillLabel = (g) =>
   g === "AUTO_APPLY" ? "Auto-apply" : g === "BLOCK" ? "Blocked" : "Human review";
 const titleCase = (s) =>
   String(s ?? "").charAt(0) + String(s ?? "").slice(1).toLowerCase();
+
+// The engine reasons in IST business days -- the timing rule compares IST calendar dates,
+// not UTC instants. Displaying UTC forced a silent conversion on the reader and made the
+// evidence look wrong: a lag the rule counted as 2 days reads as 1 in UTC. So the zone
+// shown is the zone the rule used, always labelled, with the exact ISO kept on hover.
+const BUSINESS_TZ = "Asia/Kolkata";
+const BUSINESS_TZ_LABEL = "IST";
+const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:?\d{2})$/;
+
+const instantFormat = new Intl.DateTimeFormat("en-GB", {
+  day: "numeric", month: "short", year: "numeric",
+  hour: "2-digit", minute: "2-digit", hour12: false, timeZone: BUSINESS_TZ,
+});
+
+// Detects instants by shape rather than by field name, so a rule added later gets this
+// for free instead of needing the formatter taught about its keys.
+function formatInstant(value) {
+  if (typeof value !== "string" || !ISO_INSTANT.test(value)) return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return {
+    text: `${instantFormat.format(parsed)} ${BUSINESS_TZ_LABEL}`,
+    raw: value,
+  };
+}
+
+// Money, then instant, then plain. Returns markup so the raw ISO can ride along in title.
+function evidenceValue(row) {
+  if (row.is_money) return money(row.value);
+  const instant = formatInstant(row.value);
+  return instant
+    ? `<span class="instant" title="${esc(instant.raw)} (exact, UTC offset as stored)">${esc(instant.text)}</span>`
+    : esc(row.value);
+}
+
+// Severity: a bar whose height and colour both carry the ordinal, deliberately shaped
+// unlike the gate pill so the two axes never read as the same signal.
+function severity(level) {
+  const key = String(level ?? "").toLowerCase();
+  return `<span class="sev sev-${esc(key)}"><span class="sev-bar"></span>` +
+         `<span class="sev-label">${esc(titleCase(level))}</span></span>`;
+}
 
 async function load() {
   const status = document.getElementById("status");
@@ -435,9 +513,10 @@ function render(d, cases) {
         <h3>${esc(c.match_key)} — ${esc(c.category_code)}</h3>
         <div class="meta">
           <span class="ref-inline">${esc(c.rule_id)}</span>
-          &nbsp;&nbsp;&nbsp;delta ${money(c.delta_minor)}
-          &nbsp;&nbsp;&nbsp;${esc(c.model)}, self-reported confidence
-          ${esc(c.model_confidence)}, advisory only
+          <span class="meta-gap">delta ${money(c.delta_minor)}</span>
+          <span class="meta-gap">${esc(c.model)}</span>
+          <span class="meta-gap">confidence ${esc(c.model_confidence)}
+            <span class="meta-self">self-reported</span></span>
         </div>
         <p><span class="sub-label">Agent explanation</span>${esc(c.agent_explanation)}</p>
         <p><span class="sub-label">Suggested action</span>${esc(c.agent_corrective_action)}</p>
@@ -531,7 +610,7 @@ function renderCategories(d) {
     <tr class="cat" data-code="${esc(c.code)}" tabindex="0" role="button" aria-expanded="false">
       <td>
         <div><span class="chev">&#9654;</span> <span class="cat-name">${esc(c.display_name)}</span></div>
-        <div class="cat-sev">${esc(titleCase(c.severity))}</div>
+        ${severity(c.severity)}
       </td>
       <td class="n">${c.open_findings}</td>
       <td class="n">${money(c.at_risk_minor)}</td>
@@ -596,6 +675,7 @@ function renderDrill(d) {
 
   return `
     <div class="drill-head">
+      ${severity(d.category.severity)}
       <span>${c.returned} of ${c.total_findings} findings</span>
       <span>${c.explained} explained, ${c.unexplained} not yet</span>
       <span class="spacer"></span>
@@ -607,7 +687,7 @@ function renderDrill(d) {
 function renderFinding(f) {
   const top = f.evidence_rows
     .slice(0, 3)
-    .map((r) => `${esc(r.label)} <b>${r.is_money ? money(r.value) : esc(r.value)}</b>`)
+    .map((r) => `${esc(r.label)} <b>${evidenceValue(r)}</b>`)
     .join("");
 
   const badge = f.has_explanation
@@ -618,18 +698,20 @@ function renderFinding(f) {
     .map(
       (r) =>
         `<div class="k">${esc(r.label)}</div>
-         <div class="v">${r.is_money ? money(r.value) : esc(r.value)}</div>`
+         <div class="v">${evidenceValue(r)}</div>`
     )
     .join("");
 
   const ai = f.has_explanation
     ? `<p>${esc(f.explanation)}</p>
        <p><span class="sub-label">Suggested action</span>${esc(f.corrective_action)}</p>
-       <div class="attribution">
-         ${esc(f.explained_by_model || "")}, self-reported confidence
-         ${esc(f.model_confidence || "n/a")}, advisory only. Gate:
-         ${esc(f.gate_decision || "—")}
-       </div>`
+       <dl class="meta-grid">
+         <dt>Model</dt><dd class="model">${esc(f.explained_by_model || "unknown")}</dd>
+         <dt>Confidence</dt>
+         <dd>${esc(f.model_confidence || "n/a")} <span class="meta-self">self-reported</span></dd>
+         <dt>Gate</dt>
+         <dd><span class="pill ${pillClass(f.gate_decision)}">${pillLabel(f.gate_decision)}</span></dd>
+       </dl>`
     : `<p class="missing">
          No explanation stored for this finding. The deterministic result beside it stands
          on its own — it was computed by field comparison, not by a model.
@@ -654,7 +736,7 @@ function renderFinding(f) {
             <div class="kv">${kv}</div>
           </div>
           <div class="col">
-            <h4>What the agent said about it</h4>
+            <h4>What the agent said about it<span class="h4-note">advisory only</span></h4>
             ${ai}
           </div>
         </div>
