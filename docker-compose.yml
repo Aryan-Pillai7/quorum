@@ -48,6 +48,9 @@ services:
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       # Unset leaves the approval endpoints disabled (503), not open.
       OPERATOR_TOKEN: ${OPERATOR_TOKEN:-}
+      # Share of trust-neutral approvals audited anyway. Set to 1.0 to audit everything
+      # during a walkthrough; gate-moving approvals are audited at 100% regardless.
+      AUDIT_BASELINE_RATE: ${AUDIT_BASELINE_RATE:-0.2}
     ports:
       - "8000:8000"
     depends_on:

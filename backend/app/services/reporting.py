@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
 from app.models import (
+    Approval,
     AuditEvent,
     Discrepancy,
     DiscrepancyCategory,
@@ -322,9 +323,12 @@ def discrepancy_detail(
 ) -> list[dict[str, Any]]:
     """Per-discrepancy rows for the dashboard drill-down and the narrated demo case."""
     query = (
-        select(Discrepancy, MatchRecord, DiscrepancyCategory)
+        select(Discrepancy, MatchRecord, DiscrepancyCategory, Approval)
         .join(MatchRecord, MatchRecord.id == Discrepancy.match_record_id)
         .join(DiscrepancyCategory, DiscrepancyCategory.code == Discrepancy.category_code)
+        # Outer: most findings have no approval, and the review UI needs to tell an
+        # untouched finding from one already actioned.
+        .outerjoin(Approval, Approval.discrepancy_id == Discrepancy.id)
         .order_by(func.abs(Discrepancy.delta_minor).desc())
         .limit(limit)
     )
@@ -332,10 +336,10 @@ def discrepancy_detail(
         query = query.where(Discrepancy.category_code == category_code)
 
     rows = session.execute(query).all()
-    explanations = latest_explanations(session, [str(d.id) for d, _m, _c in rows])
+    explanations = latest_explanations(session, [str(d.id) for d, _m, _c, _a in rows])
 
     detail: list[dict[str, Any]] = []
-    for discrepancy, match, category in rows:
+    for discrepancy, match, category, approval in rows:
         payload = explanations.get(str(discrepancy.id), {})
         detail.append(
             {
@@ -361,6 +365,23 @@ def discrepancy_detail(
                 "gate_decision": payload.get("gate_decision"),
                 "gate_reason": payload.get("gate_reason"),
                 "explained_by_model": payload.get("model"),
+                # Null when nobody has actioned it yet. Carries the audit state too, so
+                # the UI knows whether a second person still needs to confirm it
+                # (ADR-0025: approving clears a finding, auditing is what moves trust).
+                "approval": (
+                    {
+                        "approval_id": str(approval.id),
+                        "decision": approval.decision.value,
+                        "approver_id": approval.approver_id,
+                        "final_action": approval.final_action,
+                        "audit_status": approval.audit_status.value,
+                        "auditor_id": approval.auditor_id,
+                        "audit_selection_reason": approval.audit_selection_reason,
+                        "counts_toward_trust": approval.counts_toward_trust,
+                    }
+                    if approval is not None
+                    else None
+                ),
             }
         )
     return detail

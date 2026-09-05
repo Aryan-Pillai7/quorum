@@ -303,6 +303,31 @@
   button.gen:hover:not(:disabled) { border-color: var(--accent); }
   button.gen:disabled { opacity: 0.55; cursor: default; }
   .genhint { color: var(--ink-muted); font-size: 12.5px; }
+
+  /* Review actions. Same button treatment as Generate -- no new visual language. */
+  .actions {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    margin-top: 14px; padding-top: 13px; border-top: 1px solid var(--rule);
+  }
+  .actions .who { color: var(--ink-muted); font-size: 12.5px; }
+  /* The audit is a different actor's decision, so it is separated by a rule rather than
+     sitting in the same button group as the approval (ADR-0025). */
+  .audit-group {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    margin-left: auto; padding-left: 16px; border-left: 1px solid var(--rule);
+  }
+  .audit-label { color: var(--ink-muted); font-size: 12.5px; }
+
+  .editor { margin-top: 12px; }
+  .editor textarea {
+    width: 100%; min-height: 74px; resize: vertical;
+    border: 1px solid #CFD5DB; border-radius: 6px; padding: 9px 11px;
+    font: 400 13.5px/1.5 var(--sans); color: var(--ink); background: var(--surface);
+  }
+  .editor textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .editor .editor-actions { display: flex; gap: 10px; margin-top: 9px; align-items: center; }
+  .editor .hint { color: var(--ink-muted); font-size: 12.5px; }
+  .action-err { color: var(--block-ink); font-size: 12.5px; }
   .genbar { display: inline-flex; align-items: center; gap: 11px; flex-wrap: wrap; }
 
   /* ---------- worked example ---------- */
@@ -542,6 +567,38 @@ const drillCache = {};
 const openCategories = new Set();
 const expandedFindings = new Set();
 
+// One operator token for the session (ADR-0028). Remembered in memory so a review pass
+// is not twelve identical prompts; never persisted, so closing the tab forgets it. The
+// generate button and every approval action go through this same path -- there is not a
+// second auth mechanism.
+let operatorToken = null;
+
+function requireToken(reason) {
+  if (operatorToken) return operatorToken;
+  const entered = window.prompt(reason);
+  if (entered) operatorToken = entered.trim();
+  return operatorToken;
+}
+
+async function operatorPost(url, body, reason) {
+  const token = requireToken(reason);
+  if (!token) return { ok: false, cancelled: true };
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer " + token,
+      ...(body ? { "Content-Type": "application/json" } : {}),
+    },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  });
+  const payload = await res.json().catch(() => ({}));
+  if (res.status === 401) {
+    // Wrong token: forget it so the next attempt asks again rather than silently failing.
+    operatorToken = null;
+  }
+  return { ok: res.ok, status: res.status, payload };
+}
+
 const TICKS = 10;
 
 function ticker(sampleSize, minSample, isDecaying) {
@@ -588,6 +645,21 @@ async function toggleCategory(code) {
     cell.innerHTML = `<div class="drill-head err">Could not load: ${esc(e.message)}</div>`;
   }
 }
+
+async function refreshDrill(code) {
+  // Re-read just this category and repaint its panel. Expanded findings survive because
+  // renderFinding reapplies them from expandedFindings, so no page reload is involved.
+  delete drillCache[code];
+  const panel = document.querySelector(`tr.drillrow[data-for="${CSS.escape(code)}"]`);
+  if (!panel) return;
+  const cell = panel.querySelector("td.drill");
+  const data = await fetch(`/v1/categories/${encodeURIComponent(code)}/findings`)
+    .then((r) => r.json());
+  drillCache[code] = data;
+  cell.innerHTML = renderDrill(data);
+  wireDrill(code, cell);
+}
+
 
 function restoreOpenCategories() {
   // Rebuilt rows come back collapsed, so re-open what the user had open. Rendered from
@@ -740,11 +812,152 @@ function renderFinding(f) {
             ${ai}
           </div>
         </div>
+        ${reviewActions(f)}
       </div>
     </details>`;
 }
 
+function reviewActions(f) {
+  const id = esc(f.discrepancy_id);
+  const a = f.approval;
+
+  // State 1: nobody has actioned it. Approving clears it operationally and moves no
+  // trust score, which is why the audit controls are not offered yet (ADR-0025).
+  if (!a) {
+    return `
+      <div class="actions" data-finding="${id}">
+        <button class="gen" data-act="approve" data-id="${id}">Approve</button>
+        <button class="gen" data-act="edit" data-id="${id}">Edit and approve</button>
+        <button class="gen" data-act="reject" data-id="${id}">Reject</button>
+        <span class="who">Clears the finding. Does not move the trust score.</span>
+        <span class="action-err" data-err="${id}"></span>
+      </div>
+      <div class="editor" data-editor="${id}" hidden>
+        <textarea data-input="${id}">${esc(f.corrective_action || "")}</textarea>
+        <div class="editor-actions">
+          <button class="gen" data-act="edit-save" data-id="${id}">Save and approve</button>
+          <button class="gen" data-act="edit-cancel" data-id="${id}">Cancel</button>
+          <span class="hint">Both the agent draft and your edit are recorded.</span>
+        </div>
+      </div>`;
+  }
+
+  const decided = {
+    APPROVED: "Approved",
+    EDITED_APPROVED: "Approved with edits",
+    REJECTED: "Rejected",
+  }[a.decision] || a.decision;
+
+  // State 3: a second person has confirmed it, and that verdict moved the score.
+  if (a.counts_toward_trust) {
+    const verdict = a.audit_status === "CORRECT" ? "confirmed correct" : "marked incorrect";
+    return `
+      <div class="actions" data-finding="${id}">
+        <span class="pill ${a.audit_status === "CORRECT" ? "auto" : "block"}">Audited</span>
+        <span class="who">
+          ${esc(decided)} by ${esc(a.approver_id)}, ${verdict} by ${esc(a.auditor_id)}.
+          Counted toward this category's trust score.
+        </span>
+      </div>`;
+  }
+
+  // State 2: approved, and either awaiting a second person or outside the audit sample.
+  const audit = a.audit_status === "PENDING"
+    ? `<div class="audit-group">
+         <span class="audit-label">Second reviewer</span>
+         <button class="gen" data-act="audit-ok" data-id="${id}"
+                 data-approval="${esc(a.approval_id)}">Confirm correct</button>
+         <button class="gen" data-act="audit-bad" data-id="${id}"
+                 data-approval="${esc(a.approval_id)}">Mark incorrect</button>
+       </div>`
+    : `<div class="audit-group">
+         <span class="audit-label">Not sampled for audit, so it never affects trust</span>
+       </div>`;
+
+  return `
+    <div class="actions" data-finding="${id}">
+      <span class="pill review">${esc(decided)}</span>
+      <span class="who">by ${esc(a.approver_id)}</span>
+      <span class="action-err" data-err="${id}"></span>
+      ${audit}
+    </div>`;
+}
+
+
+function wireReviewActions(code, cell) {
+  const approverId = () => window.localStorage.getItem("quorum.reviewer") || "operator";
+
+  const fail = (id, message) => {
+    const slot = cell.querySelector(`[data-err="${CSS.escape(id)}"]`);
+    if (slot) slot.textContent = message;
+  };
+
+  cell.querySelectorAll("[data-act]").forEach((button) => {
+    button.addEventListener("click", async (event) => {
+      // The row is a <summary>; without this, acting would also collapse the finding.
+      event.preventDefault();
+      event.stopPropagation();
+
+      const act = button.dataset.act;
+      const id = button.dataset.id;
+      const editor = cell.querySelector(`[data-editor="${CSS.escape(id)}"]`);
+
+      if (act === "edit") { editor.hidden = false; editor.querySelector("textarea").focus(); return; }
+      if (act === "edit-cancel") { editor.hidden = true; return; }
+
+      let url = "/v1/approvals";
+      let body;
+      let reason = "Operator token (records a review decision):";
+
+      if (act === "approve" || act === "reject") {
+        body = {
+          discrepancy_id: id,
+          decision: act === "approve" ? "APPROVED" : "REJECTED",
+          approver_id: approverId(),
+        };
+      } else if (act === "edit-save") {
+        const text = editor.querySelector("textarea").value.trim();
+        if (!text) { fail(id, "An edited action needs text."); return; }
+        body = {
+          discrepancy_id: id,
+          decision: "EDITED_APPROVED",
+          approver_id: approverId(),
+          final_action: text,
+        };
+      } else if (act === "audit-ok" || act === "audit-bad") {
+        url = `/v1/approvals/${encodeURIComponent(button.dataset.approval)}/audit`;
+        body = { was_correct: act === "audit-ok", auditor_id: approverId() };
+        reason = "Operator token (an audit moves this category's trust score):";
+      } else {
+        return;
+      }
+
+      button.disabled = true;
+      fail(id, "");
+      try {
+        const result = await operatorPost(url, body, reason);
+        if (result.cancelled) { button.disabled = false; return; }
+        if (!result.ok) {
+          button.disabled = false;
+          fail(id, result.payload.error?.message || `Failed (${result.status})`);
+          return;
+        }
+        // An audit changes the category's score, so the table needs repainting too.
+        // Everything else only changes this panel.
+        if (act.startsWith("audit")) await load();
+        await refreshDrill(code);
+      } catch (e) {
+        button.disabled = false;
+        fail(id, e.message);
+      }
+    });
+  });
+}
+
+
 function wireDrill(code, cell) {
+  wireReviewActions(code, cell);
+
   cell.querySelectorAll("details.finding").forEach((el) => {
     el.addEventListener("toggle", () => {
       if (el.open) expandedFindings.add(el.dataset.id);
@@ -756,25 +969,24 @@ function wireDrill(code, cell) {
   if (!button) return;
   button.addEventListener("click", async (event) => {
     event.stopPropagation();
-    const token = window.prompt("Operator token (this action spends API quota):");
-    if (!token) return;
-
     button.disabled = true;
     button.textContent = "Generating";
     try {
-      const res = await fetch(`/v1/categories/${encodeURIComponent(code)}/explain`, {
-        method: "POST",
-        headers: { Authorization: "Bearer " + token },
-      });
-      const body = await res.json();
-      if (!res.ok) {
-        button.textContent = "Failed: " + esc(body.error?.message || res.status);
+      const result = await operatorPost(
+        `/v1/categories/${encodeURIComponent(code)}/explain`,
+        null,
+        "Operator token (this action spends API quota):"
+      );
+      if (result.cancelled) {
+        button.disabled = false;
+        button.textContent = "Generate explanations";
         return;
       }
-      delete drillCache[code];
-      const panel = document.querySelector(`tr.drillrow[data-for="${CSS.escape(code)}"]`);
-      panel.hidden = true;
-      await toggleCategory(code);
+      if (!result.ok) {
+        button.textContent = "Failed: " + esc(result.payload.error?.message || result.status);
+        return;
+      }
+      await refreshDrill(code);
     } catch (e) {
       button.disabled = false;
       button.textContent = "Failed: " + esc(e.message);

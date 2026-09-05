@@ -65,6 +65,11 @@ def category_findings(
     view = next((v for v in views if v.code == category_code), None)
 
     explained = sum(1 for f in findings if f["has_explanation"])
+    approved = sum(1 for f in findings if f["approval"] is not None)
+    awaiting_audit = sum(
+        1 for f in findings
+        if f["approval"] and f["approval"]["audit_status"] == "PENDING"
+    )
 
     return {
         "category": {
@@ -87,6 +92,8 @@ def category_findings(
             "returned": len(findings),
             "explained": explained,
             "unexplained": len(findings) - explained,
+            "approved": approved,
+            "awaiting_audit": awaiting_audit,
         },
         "findings": findings,
         "note": (
